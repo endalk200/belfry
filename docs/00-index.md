@@ -1,6 +1,6 @@
-# Spire Documentation Index
+# Belfry Documentation Index
 
-Project name: `Spire`.
+Project name: `Belfry`.
 
 Purpose: a lightweight local development observability backend that receives OpenTelemetry logs, traces, and metrics from many applications, stores them in SQLite, and provides a browser UI for service-centric debugging, filtering, searching, and correlation.
 

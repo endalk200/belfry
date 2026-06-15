@@ -1,0 +1,3 @@
+# GitHub Actions CI and DevSecOps Gates
+
+Belfry uses GitHub Actions as the canonical CI gate for pull requests and pushes to `main`, running full-repository formatting checks, linting, type checking, tests, and builds through Bun and Turborepo. CI pins third-party GitHub Actions by immutable commit SHA, keeps workflow permissions minimal, runs CodeQL in a separate workflow, uses Dependabot for GitHub Actions and Bun dependency updates, and treats dependency audit as a scheduled/manual advisory check rather than a required pull request gate so unrelated work is not blocked by newly disclosed vulnerabilities outside the changed code.
