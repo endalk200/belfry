@@ -1,0 +1,12 @@
+{
+	"extends": "@belfry/typescript-config/base.json",
+	"compilerOptions": {
+		"declaration": false,
+		"declarationMap": false,
+		"outDir": "dist",
+		"rootDir": "src",
+		"types": ["node"]
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["dist", "node_modules"]
+}
