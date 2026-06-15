@@ -1,0 +1,30 @@
+{
+	"$schema": "https://v2-9-14.turborepo.dev/schema.json",
+	"globalDependencies": ["scripts/**"],
+	"ui": "stream",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"outputs": ["dist/**"]
+		},
+		"lint": {
+			"dependsOn": ["^lint"]
+		},
+		"lint:fix": {
+			"dependsOn": ["^lint:fix"]
+		},
+		"test": {
+			"dependsOn": ["^test"]
+		},
+		"format": {
+			"dependsOn": ["^format"]
+		},
+		"format:check": {
+			"dependsOn": ["^format:check"]
+		},
+		"check-types": {
+			"dependsOn": ["^check-types"]
+		}
+	}
+}
