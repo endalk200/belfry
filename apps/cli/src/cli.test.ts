@@ -15,7 +15,7 @@ import { CliOutput } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { configValidationHasFailures, formatConfigValidationReport } from "./cli/commands/config/validate.cmd.js";
 import { runCliWithArgs } from "./cli/run.js";
-import { handleCliFailure } from "./runtime/failures.js";
+import { handleCliFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
 import {
 	DEFAULT_OTLP_HTTP_ENDPOINT,
 	telemetryLayerFromConfiguration,
@@ -245,6 +245,35 @@ describe("belfry CLI", () => {
 		}).pipe(Effect.provide(TestConsole.layer)),
 	);
 
+	it.effect("keeps telemetry enabled when collector rejects OPTIONS with 401", () =>
+		Effect.gen(function* () {
+			const previousFetch = globalThis.fetch;
+			globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as typeof fetch;
+
+			yield* Effect.gen(function* () {
+				const loggers = yield* Logger.CurrentLoggers;
+				const stderr = yield* TestConsole.errorLines;
+
+				assert.strictEqual(loggers.size, 1);
+				assert.deepStrictEqual(stderr, []);
+			}).pipe(
+				Effect.provide(
+					telemetryLayerFromConfiguration({
+						telemetry: {
+							enabled: true,
+							otlpEndpoint: "http://127.0.0.1:27686",
+						},
+					}),
+				),
+				Effect.ensuring(
+					Effect.sync(() => {
+						globalThis.fetch = previousFetch;
+					}),
+				),
+			);
+		}).pipe(Effect.provide(TestConsole.layer)),
+	);
+
 	it.effect("removes the default console loggers when telemetry is disabled", () =>
 		Effect.gen(function* () {
 			const loggers = yield* Logger.CurrentLoggers;
@@ -261,6 +290,18 @@ describe("belfry CLI", () => {
 			const stderr = yield* TestConsole.errorLines;
 
 			assert.deepStrictEqual(stderr, ['Invalid BELFRY_CONFIG_PATH value "". Expected a non-empty path.']);
+		}).pipe(Effect.provide(TestConsole.layer)),
+	);
+
+	it.effect("prints unexpected CLI failures to stderr", () =>
+		Effect.gen(function* () {
+			yield* Effect.exit(Effect.die("boom").pipe(Effect.catchCause(reportUnexpectedCliFailure)));
+
+			const stderr = yield* TestConsole.errorLines;
+			const stderrText = stderr.join("\n");
+
+			assert.include(stderrText, "Unexpected Belfry failure");
+			assert.include(stderrText, "boom");
 		}).pipe(Effect.provide(TestConsole.layer)),
 	);
 });

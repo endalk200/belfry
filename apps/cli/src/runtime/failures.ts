@@ -1,5 +1,5 @@
 import { formatConfigError } from "@belfry/config";
-import { Console, Data, Effect } from "effect";
+import { Cause, Console, Data, Effect } from "effect";
 
 export class ConfigValidationFailed extends Data.TaggedError("ConfigValidationFailed") {}
 
@@ -22,3 +22,23 @@ export const handleCliFailure = {
 	InvalidTelemetryEnvironment: (error: Parameters<typeof formatConfigError>[0]) =>
 		printAndFail(error, formatConfigError(error)),
 } as const;
+
+const handledCliFailureTags = new Set(Object.keys(handleCliFailure));
+
+const isHandledCliFailure = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	typeof (error as { readonly _tag: unknown })._tag === "string" &&
+	handledCliFailureTags.has((error as { readonly _tag: string })._tag);
+
+const isAlreadyReportedCliFailure = (cause: Cause.Cause<unknown>): boolean =>
+	cause.reasons.length > 0 &&
+	cause.reasons.every((reason) => Cause.isFailReason(reason) && isHandledCliFailure(reason.error));
+
+export const reportUnexpectedCliFailure = (cause: Cause.Cause<unknown>) =>
+	isAlreadyReportedCliFailure(cause)
+		? Effect.failCause(cause)
+		: Console.error(`Unexpected Belfry failure:\n${Cause.pretty(cause)}`).pipe(
+				Effect.andThen(Effect.failCause(cause)),
+			);
