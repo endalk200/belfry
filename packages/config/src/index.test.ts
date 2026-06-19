@@ -16,15 +16,28 @@ import {
 	validateBelfryConfigFromEnvironment,
 } from "./index.js";
 
+const alreadyExistsError = (path: string) =>
+	PlatformError.systemError({
+		_tag: "AlreadyExists",
+		module: "FileSystem",
+		method: "writeFile",
+		pathOrDescriptor: path,
+	});
+
 const fileSystemLayer = (files: Record<string, string>) =>
 	FileSystem.layerNoop({
 		exists: (path) => Effect.succeed(Object.hasOwn(files, String(path))),
 		readFileString: (path) => Effect.succeed(files[String(path)] ?? ""),
 		makeDirectory: () => Effect.void,
-		writeFileString: (path, data) =>
-			Effect.sync(() => {
-				files[String(path)] = data;
-			}),
+		writeFileString: (path, data, options) => {
+			const filePath = String(path);
+			if (options?.flag === "wx" && Object.hasOwn(files, filePath)) {
+				return Effect.fail(alreadyExistsError(filePath));
+			}
+			return Effect.sync(() => {
+				files[filePath] = data;
+			});
+		},
 	});
 
 describe("@belfry/config", () => {
@@ -158,6 +171,24 @@ otlp_endpoint = "not-a-url"
 
 			const alreadyExists = yield* Effect.flip(
 				initBelfryConfigFromEnvironment(env).pipe(Effect.provide(fileSystemLayer(files))),
+			);
+
+			assert.strictEqual(alreadyExists._tag, "ConfigFileAlreadyExists");
+		}),
+	);
+
+	it.effect("maps concurrent config creation to already exists", () =>
+		Effect.gen(function* () {
+			const path = "/tmp/belfry-init-race.toml";
+			const alreadyExists = yield* Effect.flip(
+				initBelfryConfigFromEnvironment({ [CONFIG_PATH_ENV]: path }).pipe(
+					Effect.provide(
+						FileSystem.layerNoop({
+							makeDirectory: () => Effect.void,
+							writeFileString: () => Effect.fail(alreadyExistsError(path)),
+						}),
+					),
+				),
 			);
 
 			assert.strictEqual(alreadyExists._tag, "ConfigFileAlreadyExists");

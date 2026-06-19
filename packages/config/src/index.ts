@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Result } from "effect";
+import * as PlatformError from "effect/PlatformError";
 import * as Toml from "toml";
 
 export const DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318";
@@ -123,7 +124,7 @@ export const telemetryConfigDescriptor = Config.all({
 	Config.nested("telemetry"),
 );
 
-export const launchKeyConfigDescriptor = Config.all({
+export const belfryConfigDescriptor = Config.all({
 	telemetry: telemetryConfigDescriptor,
 });
 
@@ -229,7 +230,7 @@ const validateResolvedConfigSources = (sources: ResolvedConfigSources) =>
 			onSuccess: (source) =>
 				source._tag === "missingDefault"
 					? Effect.succeed(warningStatus(`No config file found at ${sources.path.path}; using defaults.`))
-					: launchKeyConfigDescriptor.parse(source.provider).pipe(
+					: belfryConfigDescriptor.parse(source.provider).pipe(
 							Effect.as<ConfigSourceStatus>(validStatus(`Config file is valid at ${sources.path.path}.`)),
 							Effect.catch((error) => Effect.succeed(invalidStatus(formatConfigError(error)))),
 						),
@@ -278,24 +279,18 @@ export const initBelfryConfig = Effect.gen(function* () {
 const initBelfryConfigAtPath = (path: ConfigPathResolution) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
-		const exists = yield* fs
-			.exists(path.path)
-			.pipe(Effect.mapError((cause) => makeConfigFileWriteError(path.path, cause)));
-
-		yield* Effect.annotateCurrentSpan({
-			"belfry.config.exists": exists,
-		});
-
-		if (exists) {
-			return yield* Effect.fail(new ConfigFileAlreadyExists({ path: path.path }));
-		}
-
 		yield* fs
 			.makeDirectory(dirname(path.path), { recursive: true })
 			.pipe(Effect.mapError((cause) => makeConfigFileWriteError(path.path, cause)));
 		yield* fs
-			.writeFileString(path.path, starterConfigToml)
-			.pipe(Effect.mapError((cause) => makeConfigFileWriteError(path.path, cause)));
+			.writeFileString(path.path, starterConfigToml, { flag: "wx" })
+			.pipe(
+				Effect.mapError((cause): ConfigFileAlreadyExists | ConfigFileWriteError =>
+					isAlreadyExistsPlatformError(cause)
+						? new ConfigFileAlreadyExists({ path: path.path })
+						: makeConfigFileWriteError(path.path, cause),
+				),
+			);
 
 		yield* Effect.logInfo("Created Belfry Configuration file", {
 			path: path.path,
@@ -472,7 +467,7 @@ const parseEffectiveConfig = (sources: ResolvedConfigSources): Effect.Effect<Bel
 			ConfigProvider.orElse(file.provider, ConfigProvider.fromUnknown(defaultBelfryConfiguration)),
 		);
 
-		const config = yield* launchKeyConfigDescriptor.parse(provider);
+		const config = yield* belfryConfigDescriptor.parse(provider);
 
 		yield* Effect.annotateCurrentSpan({
 			"belfry.config.effective_status": "valid",
@@ -486,6 +481,9 @@ const validStatus = (message: string): ConfigSourceStatus => ({
 	_tag: "valid",
 	message,
 });
+
+const isAlreadyExistsPlatformError = (cause: unknown): cause is PlatformError.PlatformError =>
+	cause instanceof PlatformError.PlatformError && cause.reason._tag === "AlreadyExists";
 
 const invalidStatus = (message: string): ConfigSourceStatus => ({
 	_tag: "invalid",
