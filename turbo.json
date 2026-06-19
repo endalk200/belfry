@@ -8,23 +8,30 @@
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
 			"outputs": ["dist/**"]
 		},
+		"transit": {
+			"dependsOn": ["^transit"]
+		},
 		"lint": {
-			"dependsOn": ["^lint"]
+			"dependsOn": ["transit"],
+			"outputs": []
 		},
 		"lint:fix": {
-			"dependsOn": ["^lint:fix"]
+			"cache": false
 		},
 		"test": {
-			"dependsOn": ["^test"]
+			"dependsOn": ["transit"],
+			"outputs": []
 		},
 		"format": {
-			"dependsOn": ["^format"]
+			"cache": false
 		},
 		"format:check": {
-			"dependsOn": ["^format:check"]
+			"dependsOn": ["transit"],
+			"outputs": []
 		},
 		"check-types": {
-			"dependsOn": ["^check-types"]
+			"dependsOn": ["transit"],
+			"outputs": []
 		}
 	}
 }

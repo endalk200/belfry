@@ -48,8 +48,9 @@ if (!flagVersion.includes(packageJson.version)) {
 }
 
 const configPath = run(binPath, ["config", "path"], smokeRoot);
+const normalizedConfigPath = configPath.replaceAll("\\", "/");
 
-if (!configPath.endsWith("/.belfry/config.toml")) {
+if (!normalizedConfigPath.endsWith("/.belfry/config.toml")) {
 	throw new Error(`Expected config path smoke test to print the default config path, got ${configPath}.`);
 }
 

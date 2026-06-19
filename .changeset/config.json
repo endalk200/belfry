@@ -6,9 +6,9 @@
 	"commit": false,
 	"fixed": [],
 	"ignore": [
-		"@launchkey/biome-config",
-		"@launchkey/config",
-		"@launchkey/typescript-config"
+		"@belfry/biome-config",
+		"@belfry/config",
+		"@belfry/typescript-config"
 	],
 	"linked": [],
 	"updateInternalDependencies": "patch"
