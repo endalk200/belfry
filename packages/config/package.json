@@ -21,14 +21,14 @@
 		"test": "vitest run src --passWithNoTests"
 	},
 	"dependencies": {
-		"effect": "4.0.0-beta.78",
+		"effect": "4.0.0-beta.92",
 		"toml": "^4.1.1"
 	},
 	"devDependencies": {
-		"@effect/vitest": "4.0.0-beta.78",
+		"@effect/vitest": "4.0.0-beta.92",
 		"@belfry/typescript-config": "workspace:*",
-		"@types/node": "^25.9.2",
+		"@types/node": "^26.0.1",
 		"typescript": "6.0.3",
-		"vitest": "^4.1.8"
+		"vitest": "^4.1.9"
 	}
 }
