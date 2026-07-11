@@ -23,10 +23,10 @@
 		"devtools": "devtools"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.16",
+		"@biomejs/biome": "2.5.3",
 		"@changesets/cli": "^2.31.0",
-		"turbo": "^2.9.14",
-		"typescript": "6.0.3"
+		"turbo": "^2.10.4",
+		"typescript": "7.0.2"
 	},
 	"engines": {
 		"node": ">=22.12.0"
