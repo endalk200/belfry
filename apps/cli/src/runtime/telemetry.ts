@@ -56,11 +56,11 @@ const makeTelemetryLayer = (endpoint: string) =>
 					),
 				],
 				logRecordProcessor: [
-					new SimpleLogRecordProcessor(
-						new OTLPLogExporter({
+					new SimpleLogRecordProcessor({
+						exporter: new OTLPLogExporter({
 							url: `${endpoint.replace(/\/$/, "")}/v1/logs`,
 						}),
-					),
+					}),
 				],
 				loggerMergeWithExisting: false,
 			};

@@ -13,8 +13,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Check npm release status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_stage: ${{ steps.release.outputs.should_stage }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Check package version
+        id: release
+        run: |
+          version="$(node -p 'require("./apps/cli/package.json").version')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          if npm view "@belfry/cli@${version}" version >/dev/null 2>&1; then
+            echo "Version ${version} already exists on npm; skipping staging."
+            echo "should_stage=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Version ${version} is not on npm; staging is required."
+          echo "should_stage=true" >> "$GITHUB_OUTPUT"
+
   stage:
     name: Stage @belfry/cli
+    needs: preflight
+    if: needs.preflight.outputs.should_stage == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm-production
@@ -23,7 +57,7 @@ jobs:
       id-token: write
     outputs:
       staged: ${{ steps.stage.outputs.staged }}
-      version: ${{ steps.package.outputs.version }}
+      version: ${{ needs.preflight.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -69,17 +103,11 @@ jobs:
       - name: Smoke test packed npm package
         run: bun run release:smoke
 
-      - name: Read package version
-        id: package
-        run: |
-          version="$(node -p 'require("./apps/cli/package.json").version')"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
       - name: Stage package on npm
         id: stage
         working-directory: apps/cli
         env:
-          PKG_VERSION: ${{ steps.package.outputs.version }}
+          PKG_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           if npm view "@belfry/cli@${PKG_VERSION}" version >/dev/null 2>&1; then
             echo "Version ${PKG_VERSION} already exists on npm; skipping staging."
