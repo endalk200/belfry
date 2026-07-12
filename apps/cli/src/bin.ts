@@ -1,8 +1,8 @@
-#!/usr/bin/env node
-import { NodeRuntime } from "@effect/platform-node";
+#!/usr/bin/env bun
+import { BunRuntime } from "@effect/platform-bun";
 
 import { program } from "./program.js";
 
-NodeRuntime.runMain(program, {
+BunRuntime.runMain(program, {
 	disableErrorReporting: true,
 });

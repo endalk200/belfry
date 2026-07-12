@@ -35,7 +35,7 @@ const traceCliRun = <E, R>(args: ReadonlyArray<string>, effect: Effect.Effect<vo
 		);
 	});
 
-const normalizeCliArgs = (args: ReadonlyArray<string>) => (args.length === 0 ? ["--help"] : args);
+const normalizeCliArgs = (args: ReadonlyArray<string>) => args;
 
 export const runCliWithArgs = (args: ReadonlyArray<string>) => {
 	const commandArgs = normalizeCliArgs(args);

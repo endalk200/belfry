@@ -31,27 +31,33 @@ const packOutput = run("npm", ["pack", "--json", "--pack-destination", smokeRoot
 const [packedPackage] = JSON.parse(packOutput) as Array<{ readonly filename: string }>;
 const tarballPath = join(smokeRoot, packedPackage.filename);
 
-run("npm", ["init", "-y"], smokeRoot);
-run("npm", ["install", tarballPath], smokeRoot);
+run("bun", ["init", "-y"], smokeRoot);
+run("bun", ["add", tarballPath], smokeRoot);
 
 const binPath = join(smokeRoot, "node_modules", ".bin", "belfry");
-const actualVersion = run(binPath, ["version"], smokeRoot);
+const actualVersion = run("bun", [binPath, "version"], smokeRoot);
 
 if (actualVersion !== packageJson.version) {
 	throw new Error(`Expected belfry version to print ${packageJson.version}, got ${actualVersion}.`);
 }
 
-const flagVersion = run(binPath, ["--version"], smokeRoot);
+const flagVersion = run("bun", [binPath, "--version"], smokeRoot);
 
 if (!flagVersion.includes(packageJson.version)) {
 	throw new Error(`Expected belfry --version to include ${packageJson.version}, got ${flagVersion}.`);
 }
 
-const configPath = run(binPath, ["config", "path"], smokeRoot);
+const configPath = run("bun", [binPath, "config", "path"], smokeRoot);
 const normalizedConfigPath = configPath.replaceAll("\\", "/");
 
 if (!normalizedConfigPath.endsWith("/.belfry/config.toml")) {
 	throw new Error(`Expected config path smoke test to print the default config path, got ${configPath}.`);
+}
+
+const databasePath = run("bun", [binPath, "database", "path"], smokeRoot);
+
+if (!databasePath.endsWith("telemetry.db")) {
+	throw new Error(`Expected database path smoke test to identify telemetry.db, got ${databasePath}.`);
 }
 
 console.log(`Smoke-tested @belfry/cli@${packageJson.version} from ${packedPackage.filename}.`);

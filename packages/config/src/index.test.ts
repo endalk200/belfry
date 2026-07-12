@@ -3,9 +3,14 @@ import { Effect, FileSystem } from "effect";
 import * as PlatformError from "effect/PlatformError";
 
 import {
+	BELFRY_DAEMON_PORT_ENV,
+	BELFRY_STATE_DIRECTORY_ENV,
 	BelfryConfig,
 	CONFIG_PATH_ENV,
+	DEFAULT_DAEMON_PORT,
 	DEFAULT_OTLP_HTTP_ENDPOINT,
+	DEFAULT_RETENTION_MAX_BYTES,
+	daemonEndpoint,
 	initBelfryConfigFromEnvironment,
 	loadBelfryConfigFromEnvironment,
 	OTLP_ENDPOINT_ENV,
@@ -41,17 +46,61 @@ const fileSystemLayer = (files: Record<string, string>) =>
 	});
 
 describe("@belfry/config", () => {
+	it("formats IPv4, hostname, and IPv6 Daemon endpoints", () => {
+		assert.strictEqual(daemonEndpoint("127.0.0.1", 4318), "http://127.0.0.1:4318");
+		assert.strictEqual(daemonEndpoint("localhost", 4318), "http://localhost:4318");
+		assert.strictEqual(daemonEndpoint("::1", 4318), "http://[::1]:4318");
+	});
+
 	it.effect("loads built-in defaults when the default config file is missing", () =>
 		Effect.gen(function* () {
 			const config = yield* loadBelfryConfigFromEnvironment({});
 
-			assert.deepStrictEqual(config, {
-				telemetry: {
-					enabled: false,
-					otlpEndpoint: DEFAULT_OTLP_HTTP_ENDPOINT,
-				},
-			});
+			assert.strictEqual(config.telemetry.enabled, false);
+			assert.strictEqual(config.telemetry.otlpEndpoint, DEFAULT_OTLP_HTTP_ENDPOINT);
+			assert.strictEqual(config.daemon.host, "127.0.0.1");
+			assert.strictEqual(config.daemon.port, DEFAULT_DAEMON_PORT);
+			assert.match(config.daemon.stateDirectory, /belfry$/u);
+			assert.strictEqual(config.storage.retentionMaxBytes, DEFAULT_RETENTION_MAX_BYTES);
+			assert.strictEqual(config.storage.retentionMaxAgeNs, 604_800_000_000_000n);
+			assert.strictEqual(config.ingestion.maxCompressedBytes < config.ingestion.maxDecompressedBytes, true);
+			assert.strictEqual(config.query.maxResults, 500);
 		}).pipe(Effect.provide(fileSystemLayer({}))),
+	);
+
+	it.effect("derives the database and registry from an explicit machine state directory", () =>
+		Effect.gen(function* () {
+			const config = yield* loadBelfryConfigFromEnvironment({
+				[BELFRY_STATE_DIRECTORY_ENV]: "/tmp/belfry-machine-state",
+				[BELFRY_DAEMON_PORT_ENV]: "54321",
+			});
+
+			assert.strictEqual(config.daemon.port, 54_321);
+			assert.strictEqual(config.daemon.stateDirectory, "/tmp/belfry-machine-state");
+			assert.strictEqual(config.storage.databasePath, "/tmp/belfry-machine-state/telemetry.db");
+			assert.strictEqual(config.daemon.registryPath, "/tmp/belfry-machine-state/daemon.json");
+			assert.strictEqual(config.daemon.lockPath, "/tmp/belfry-machine-state/daemon.lock");
+		}).pipe(Effect.provide(fileSystemLayer({}))),
+	);
+
+	it.effect("requires queue byte capacity for one maximum compressed request", () =>
+		Effect.gen(function* () {
+			const invalid = yield* Effect.flip(
+				loadBelfryConfigFromEnvironment({ [CONFIG_PATH_ENV]: "/tmp/belfry-small-queue.toml" }).pipe(
+					Effect.provide(
+						fileSystemLayer({
+							"/tmp/belfry-small-queue.toml": `[ingestion]
+max_compressed_bytes = 8192
+queue_byte_capacity = 4096
+`,
+						}),
+					),
+				),
+			);
+
+			assert.strictEqual(invalid._tag, "InvalidBelfryConfiguration");
+			if (invalid._tag === "InvalidBelfryConfiguration") assert.strictEqual(invalid.path, "ingestion.queue");
+		}),
 	);
 
 	it.effect("uses env overrides before TOML file values", () =>
@@ -150,6 +199,52 @@ otlp_endpoint = "not-a-url"
 				}),
 			),
 		),
+	);
+
+	it.effect("rejects interface preferences outside the authoritative bounded cadence and lookback", () =>
+		Effect.gen(function* () {
+			const report = yield* validateBelfryConfigFromEnvironment({
+				[CONFIG_PATH_ENV]: "/tmp/belfry-invalid-interface-config.toml",
+			});
+
+			assert.strictEqual(report.file._tag, "valid");
+			assert.strictEqual(report.effective._tag, "invalid");
+			assert.match(report.effective.message, /interfaces\.refresh_interval_ms/u);
+		}).pipe(
+			Effect.provide(
+				fileSystemLayer({
+					"/tmp/belfry-invalid-interface-config.toml": `[interfaces]
+refresh_interval_ms = 100
+default_range_minutes = 15
+`,
+				}),
+			),
+		),
+	);
+
+	it.effect("rejects non-positive operational batch, index, drain, and timeout bounds", () =>
+		Effect.gen(function* () {
+			const cases = [
+				["daemon.startup_timeout_ms", "[daemon]\nstartup_timeout_ms = 0\n"],
+				["daemon.shutdown_timeout_ms", "[daemon]\nshutdown_timeout_ms = -1\n"],
+				["storage.retention_batch_size", "[storage]\nretention_batch_size = 0\n"],
+				["storage.indexed_attribute_limit", "[storage]\nindexed_attribute_limit = 0\n"],
+				["storage.indexed_value_max_bytes", "[storage]\nindexed_value_max_bytes = 0\n"],
+				["storage.indexed_key_limit", "[storage]\nindexed_key_limit = 0\n"],
+				["storage.indexed_values_per_key_limit", "[storage]\nindexed_values_per_key_limit = 0\n"],
+				["ingestion.drain_timeout_ms", "[ingestion]\ndrain_timeout_ms = 0\n"],
+				["query.max_results", "[query]\nmax_results = 99\n"],
+				["query.timeout_ms", "[query]\ntimeout_ms = 0\n"],
+			] as const;
+			for (const [path, contents] of cases) {
+				const configPath = `/tmp/belfry-invalid-${path.replaceAll(".", "-")}.toml`;
+				const report = yield* validateBelfryConfigFromEnvironment({ [CONFIG_PATH_ENV]: configPath }).pipe(
+					Effect.provide(fileSystemLayer({ [configPath]: contents })),
+				);
+				assert.strictEqual(report.effective._tag, "invalid");
+				assert.include(report.effective.message, path);
+			}
+		}),
 	);
 
 	it.effect("provides the resolved service through an Effect layer", () =>

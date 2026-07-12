@@ -1,5 +1,5 @@
 import { BelfryConfig, type BelfryConfiguration, DEFAULT_OTLP_HTTP_ENDPOINT } from "@belfry/config";
-import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
+import * as WebSdk from "@effect/opentelemetry/WebSdk";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
@@ -39,7 +39,7 @@ const checkCollector = (endpoint: string) =>
 	}).pipe(Effect.asVoid);
 
 const makeTelemetryLayer = (endpoint: string) =>
-	NodeSdk.layer(
+	WebSdk.layer(
 		Effect.gen(function* () {
 			yield* checkCollector(endpoint);
 
@@ -82,7 +82,7 @@ export const telemetryLayerFromMode = (
 			)
 		: withoutConsoleLogger;
 
-export const telemetryLayerFromConfiguration = (config: BelfryConfiguration): Layer.Layer<never> =>
+export const telemetryLayerFromConfiguration = (config: Pick<BelfryConfiguration, "telemetry">): Layer.Layer<never> =>
 	telemetryLayerFromMode(config.telemetry.enabled ? "enabled" : "disabled", config.telemetry.otlpEndpoint);
 
 export const telemetryLayer = Layer.unwrap(

@@ -1,0 +1,11 @@
+{
+	"extends": "../packages/typescript-config/base.json",
+	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"noEmit": true,
+		"rootDir": ".",
+		"types": ["bun"]
+	},
+	"include": ["benchmark-workbench.ts", "otel-sdk-fixture.ts"]
+}
