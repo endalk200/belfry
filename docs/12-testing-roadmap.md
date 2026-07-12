@@ -1,185 +1,66 @@
-# Testing And Roadmap
+# Testing and Benchmark Evidence
 
-## Testing Strategy
+## Test layers
 
-Testing should focus on protocol compatibility, persistence correctness, query correctness, and UI workflows.
+- Telemetry schemas cover canonical IDs, exact nanoseconds, typed values, and
+  Service identity.
+- Workspace tests cover filters, history, selection stability, correlation,
+  URL round-trips, and malformed trace waterfalls.
+- Query API/Daemon tests cover schema bounds, endpoint-specific signed cursors,
+  multi-page Service/diagnostic results, tampering, query fingerprints, and
+  OpenAPI paths.
+- Storage tests use temporary real SQLite databases for WAL, persistence,
+  last-write-wins projections, FTS, correlation, facets, timestamp fallback,
+  bounded retention, and persisted retention-failure health/diagnostics.
+- Ingestion tests use real workers for queue bounds, bounded rejection
+  diagnostics, content/encoding errors, gzip, protobuf/JSON decode, durable
+  acknowledgement, write latency, and post-start worker-crash readiness.
+- Daemon tests bind real loopback listeners for lifecycle ownership, graceful
+  drain, routes, web assets, docs, and OpenAPI.
+- TUI tests use component and real-PTY harnesses; web workflows use Playwright
+  at desktop and narrow viewports.
+- Release tests pack the public npm artifact, audit its allowlist, install it in
+  a clean project, and exercise the installed executable.
 
-## Unit Tests
+## Real SDK acceptance
 
-Decoder:
+`bun run acceptance:fixture` uses official JavaScript OpenTelemetry trace and
+log SDKs with the OTLP HTTP exporters. The fixture creates a distributed trace
+with parent/child spans and a correlated complete log, then the public Query API
+verifies canonical identities, Services, and correlation.
 
-- Valid OTLP protobuf traces.
-- Valid OTLP protobuf logs.
-- Valid OTLP protobuf metrics.
-- Invalid protobuf.
-- JSON payloads.
-- Gzip payloads.
-- Unsupported content type.
+## Reference benchmark
 
-Normalizer:
+`bun run benchmark:workbench` exercises the built public CLI, real `/usr/bin/expect`
+PTYs, a foreground Daemon, SQLite, HTTP, and headless Chrome. It visibly fails
+with a non-zero exit when a threshold regresses.
 
-- Resource extraction.
-- Service identity extraction.
-- Trace/span ID hex conversion.
-- Log body conversion.
-- Metric stream fingerprint stability.
-- Attribute indexing allow/deny rules.
-- Redaction.
+The dataset contains 100 traces / 6,400 spans, 8,000 logs, and a separate
+1,000-span trace. It measures three cold first frames, five warm adoptions,
+three fresh ingest trials, warmed recent/FTS queries, concurrent health/query
+traffic during ingest, API/detail interaction, virtualized row count, repeated
+ingest RSS, repeated web refresh heap, queue drain, and live database size.
 
-Query builder:
+Accepted thresholds are:
 
-- Time range filters.
-- Attribute filters.
-- Full-text search.
-- Cursor pagination.
-- Limit enforcement.
+| Guardrail | Threshold |
+| --- | ---: |
+| Fresh Daemon + first TUI frame, median | `< 750 ms` |
+| Warm Daemon adoption, median | `< 250 ms` |
+| 6,400 spans, median | `< 2,000 ms` |
+| 8,000 logs, median | `< 500 ms` |
+| Recent/indexed query median / p95 | `< 100 / 250 ms` |
+| 1,000-span Query API / first interactive detail | `< 250 / 500 ms` |
+| Health/query maximum during ingest | `< 250 ms` |
+| Repeated-ingest Daemon RSS growth | `< 64 MB` |
+| Repeated-refresh browser heap growth | `< 20 MB` |
 
-## Integration Tests
+The accepted environment and measurements are versioned under
+[benchmarks](benchmarks/). These are local-development quality guardrails, not
+production SLOs.
 
-Use real SQLite temp DB.
+## Scope of future work
 
-Scenarios:
-
-- Insert traces, restart store, query traces.
-- Insert logs with trace IDs, query trace logs.
-- Insert metrics, query chart points.
-- Retention deletes old records.
-- FTS search returns expected rows.
-- WAL mode enabled.
-- Migration idempotency.
-
-## Protocol Compatibility Tests
-
-Use real SDKs where possible:
-
-- Node.js OpenTelemetry SDK.
-- Python OpenTelemetry SDK.
-- Go OpenTelemetry SDK.
-- Java OpenTelemetry SDK.
-
-Each should export:
-
-- One trace with child spans.
-- One correlated log.
-- One gauge.
-- One counter.
-- One histogram.
-
-Run test app against local server and assert UI API sees all records.
-
-## Golden Fixtures
-
-Keep OTLP fixture files:
-
-```text
-fixtures/otlp/traces-basic.pb
-fixtures/otlp/logs-correlated.pb
-fixtures/otlp/metrics-basic.pb
-fixtures/otlp/metrics-histogram.pb
-fixtures/otlp/mixed-resource-attrs.json
-```
-
-Fixtures let decoder/storage tests run without external SDKs.
-
-## UI Tests
-
-Use Playwright:
-
-- Services page shows service after ingest.
-- Logs search works.
-- Trace detail opens from log trace ID.
-- Waterfall renders non-empty.
-- Metrics chart renders after points.
-- Settings reset clears data.
-
-## Performance Tests
-
-Local benchmark targets:
-
-- Ingest 10,000 spans in under 5 seconds.
-- Ingest 100,000 logs without process memory runaway.
-- Query recent 500 logs under 250 ms after warmup.
-- Open 1,000-span trace under 500 ms.
-- Keep idle memory modest for a dev tool.
-
-These are not production SLOs; they are guardrails.
-
-## MVP Roadmap
-
-### Phase 0: Skeleton
-
-- Repo setup.
-- Effect TS backend.
-- SQLite migrations.
-- Static UI shell.
-- Health endpoint.
-
-### Phase 1: OTLP/HTTP Traces
-
-- Decode protobuf traces.
-- Store resources/scopes/spans.
-- Trace list and trace detail waterfall.
-- Service discovery from spans.
-
-### Phase 2: Logs
-
-- Decode protobuf logs.
-- Store logs.
-- FTS search.
-- Trace/log correlation.
-- Logs explorer.
-
-### Phase 3: Metrics
-
-- Decode protobuf metrics.
-- Store streams/points.
-- Metric list and basic charts.
-- Gauge, sum, histogram basics.
-
-### Phase 4: Polish For Daily Use
-
-- Retention.
-- DB stats.
-- Settings.
-- Ingestion diagnostics.
-- Client setup snippets.
-- Export/reset/vacuum CLI.
-
-### Phase 5: Compatibility
-
-- OTLP/HTTP JSON.
-- Gzip.
-- SDK integration tests.
-- Docker image.
-
-### Phase 6: Advanced Correlation
-
-- Metric exemplars table.
-- Derived traces table.
-- Service dependency graph from spans.
-- Saved views.
-- Attribute autocomplete.
-
-### Phase 7: OTLP/gRPC
-
-- Add gRPC server on `4317`.
-- Match OTLP service definitions.
-- Reuse decoder/normalizer/writer.
-
-## Open Questions
-
-- Should the UI/API port mimic Jaeger (`16686`) or use a distinct port (`4319`)?
-- Should the product provide an optional Collector-compatible config generator?
-- Should raw payloads be stored per record, per request, or both?
-- How much of metric temporality conversion should happen at write time versus query time?
-- Should the first UI be React, Solid, or another framework?
-- Should there be an MCP server in v1 for agent access?
-
-## Recommended Initial Decisions
-
-- Use UI/API port `4319` to avoid clashing with Jaeger.
-- Support `16686` as optional alias later.
-- Store raw record JSON, not full raw request bytes by default.
-- Convert metric temporality mostly at query time.
-- Build UI with React + Vite for ecosystem leverage unless there is a strong preference otherwise.
-- Add MCP after API stabilizes.
+Other telemetry signals, OTLP/gRPC, remote access, export, and an MCP server can
+be considered only through a new product decision. They are not partially
+implemented or implied by the current APIs and docs.

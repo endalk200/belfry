@@ -1,217 +1,118 @@
-# Operations And Security
+# Operations, Privacy, and Security
 
-## Local-First Security Model
+## Local security boundary
 
-Default bind:
+Belfry accepts only loopback hosts and has no remote-binding mode. The default
+listener is `127.0.0.1:4318`; authentication is intentionally omitted inside
+that local boundary. The Daemon does not upload telemetry.
 
-- OTLP: `127.0.0.1`
-- UI/API: `127.0.0.1`
+Local telemetry is still sensitive. It may contain credentials, cookies,
+personal data, source, SQL, prompts, and request bodies. Belfry does not promise
+automatic redaction: instrumentation must remove unsafe data before export.
+Keys resembling authorization, cookie, password, secret, token, API keys, or
+high-cardinality identifiers are excluded from automatic scalar and FTS
+attribute projection. Distinct projected keys and values per key are also
+capped, while complete records remain available until retention/reset.
 
-Reason:
-
-- Telemetry can include secrets, tokens, request bodies, stack traces, SQL, headers, environment values, and user data.
-- A dev observability UI should not be exposed on the network accidentally.
-
-If binding to `0.0.0.0`, require an explicit flag:
-
-```sh
-project-otel serve --host 0.0.0.0 --allow-remote
-```
-
-## Authentication
-
-MVP:
-
-- No auth when bound to localhost.
-- Block remote bind unless explicit.
-
-Later:
-
-- Generate browser token on startup for remote bind.
-- Support static token in env var.
-
-## Sensitive Data
-
-Do not promise automatic redaction. Instead:
-
-- Provide obvious warnings.
-- Add optional redaction rules.
-- Avoid indexing obviously sensitive keys by default.
-
-Default non-indexed key patterns:
-
-```text
-*password*
-*secret*
-*token*
-*authorization*
-*cookie*
-*set-cookie*
-*api_key*
-*apikey*
-```
-
-Still store raw telemetry unless redaction is enabled. If redaction is enabled, redact before persistence and FTS indexing.
-
-## Redaction Rules
-
-Config example:
-
-```yaml
-redaction:
-  enabled: true
-  attribute_key_patterns:
-    - "*password*"
-    - "*authorization*"
-  replacement: "[redacted]"
-```
-
-Apply redaction during normalization.
-
-## Disk Controls
-
-Defaults:
-
-- 2 GB max DB size.
-- 24 hours retention.
-
-Expose:
+## Lifecycle
 
 ```sh
-project-otel db stats
-project-otel db vacuum
-project-otel db reset
+belfry daemon start
+belfry daemon status --json
+belfry daemon restart
+belfry daemon stop
+belfry daemon serve
 ```
 
-UI should show DB size and retention status.
+Lifecycle commands verify the registered PID, process start identity, endpoint,
+and ownership nonce. Interfaces adopt the same healthy Daemon and do not own its
+lifetime. Foreground `serve` is intended for debugging and supervisors.
 
-## Performance Controls
+## State and configuration
 
-Config:
+Default state directories are platform-native:
 
-- Max request bytes.
-- Max decompressed bytes.
-- Max queue size.
-- Max records per batch.
-- Max FTS body size.
-- Max indexed attributes per record.
-- Query timeout.
-- Query result limit.
+- macOS: `~/Library/Application Support/belfry`
+- Linux: `$XDG_STATE_HOME/belfry` or `~/.local/state/belfry`
+- Windows: `%LOCALAPPDATA%/belfry`
 
-Default query timeout:
+The default config file is `~/.belfry/config.toml`. Configuration precedence is
+environment, TOML, then built-in defaults. Important environment overrides are:
 
-- 5 seconds.
+- `BELFRY_DAEMON_HOST`, `BELFRY_DAEMON_PORT`
+- `BELFRY_STATE_DIRECTORY`, `BELFRY_DATABASE_PATH`
+- `BELFRY_RETENTION_DAYS`, `BELFRY_RETENTION_MAX_BYTES`
 
-Default UI result limit:
+Use `belfry config init`, `belfry config validate`, and `belfry config path` to
+manage the file. The `BELFRY_TELEMETRY` settings control Belfry's opt-in export
+of its own internal telemetry; they do not control the local receiver.
+The `[interfaces]` settings are authoritative for `refresh_interval_ms`,
+`default_range_minutes`, and `web_open_browser`; both renderers display and use
+the configured range/cadence, while `belfry web --no-open` remains an explicit
+one-run override.
 
-- Logs: 500.
-- Trace list: 100.
-- Metric streams: 500.
+All operational safety limits are regular TOML keys and are checked by
+`belfry config validate` before the Daemon starts:
 
-## SQLite Maintenance
+| Section | Keys | Valid range / invariant |
+| --- | --- | --- |
+| `daemon` | `startup_timeout_ms`, `shutdown_timeout_ms` | whole milliseconds, 1–3,600,000 |
+| `storage` | `retention_days`, `retention_max_bytes` | positive |
+| `storage` | `retention_batch_size` | 1–10,000 records |
+| `storage` | `indexed_attribute_limit` | 1–1,024 per record |
+| `storage` | `indexed_value_max_bytes` | 1–1,048,576 bytes |
+| `storage` | `indexed_key_limit` | 1–65,536 distinct keys |
+| `storage` | `indexed_values_per_key_limit` | 1–1,000,000 distinct scalar values per key |
+| `ingestion` | `max_compressed_bytes`, `max_decompressed_bytes` | positive safe integers; decompressed ≥ compressed |
+| `ingestion` | `queue_request_capacity` | 1–65,536 requests |
+| `ingestion` | `queue_byte_capacity` | at least one maximum compressed request |
+| `ingestion` | `drain_timeout_ms` | whole milliseconds, 1–3,600,000 |
+| `query` | `max_lookback_days` | positive |
+| `query` | `max_results` | 100–500; the lower bound keeps the documented UI and Debugging Skill page sizes valid |
+| `query` | `timeout_ms` | whole milliseconds, 1–3,600,000 |
+| `interfaces` | `refresh_interval_ms` | whole milliseconds, 750–3,600,000 |
+| `interfaces` | `default_range_minutes` | whole minutes within the configured lookback |
 
-Run periodically:
+`belfry config init` writes every key above with the built-in defaults, so the
+effective limits are discoverable without consulting source code.
 
-```sql
-PRAGMA wal_checkpoint(PASSIVE);
-```
-
-Run on manual maintenance:
-
-```sql
-VACUUM;
-```
-
-FTS maintenance:
-
-```sql
-INSERT INTO logs_fts(logs_fts) VALUES('optimize');
-INSERT INTO spans_fts(spans_fts) VALUES('optimize');
-```
-
-Run optimize after large deletions or on explicit vacuum.
-
-## Backups And Export
-
-Support export:
+## Database operations
 
 ```sh
-project-otel export --from 24h --format ndjson --out telemetry.ndjson
+belfry database path
+belfry database stats --json
+belfry database status
+belfry database checkpoint
+belfry database vacuum
+belfry database reset --yes
 ```
 
-Signals:
+Checkpoint, vacuum, and reset require the verified Daemon to be stopped. Reset
+requires `--yes`. Default retention is seven days or one GiB, applied in bounded
+oldest-first batches.
 
-```sh
-project-otel export logs
-project-otel export traces
-project-otel export metrics
-```
+## Health and troubleshooting
 
-This is useful for bug reports without requiring direct DB sharing.
+`/api/health` reports `live`, `migrationReady`, `writerReady`,
+`readsAvailable`, queue depth/bytes, database size, and Daemon identity.
+`/api/ingestion/stats` reports durable counts, write latency, retention, and
+drops. `/api/ingestion/diagnostics` records actionable rejection and retention
+codes. A runtime writer/retention failure pauses new ingest and changes health
+to degraded without disabling safe read-only inspection; restart retries a
+previously failed retention check before enabling the writer.
 
-## Compatibility
+On shutdown, Belfry stops accepting work and drains already accepted requests
+for up to ten seconds. A forced termination can leave WAL content, which SQLite
+recovers on the next verified startup.
 
-Support these OTel SDK paths:
+## Threat controls
 
-- Global OTLP endpoint to `/v1/*`.
-- Per-signal endpoint as-is.
-- `http/protobuf`.
-- `http/json`.
-- gzip compression.
-
-Later:
-
-- OTLP/gRPC.
-- Collector configs.
-- Prometheus scrape bridge.
-
-## Observability Of The Tool
-
-Expose internal status:
-
-```http
-GET /api/ingestion/stats
-GET /api/ingestion/errors
-GET /internal/health
-```
-
-Health response:
-
-```json
-{
-  "status": "ok",
-  "db": "ok",
-  "queueDepth": 42,
-  "dbSizeBytes": 12345678
-}
-```
-
-## Upgrade Strategy
-
-On startup:
-
-1. Open DB.
-2. Acquire migration lock.
-3. Run migrations.
-4. Verify indexes.
-5. Start ingestion.
-
-If migration fails:
-
-- Do not accept ingestion.
-- Show UI/API error.
-- Suggest backup/reset.
-
-Because this is local dev, destructive reset is acceptable only when user explicitly invokes it.
-
-## Threats
-
-| Threat | Mitigation |
+| Threat | Control |
 | --- | --- |
-| Remote access to sensitive telemetry | localhost bind by default, explicit remote flag |
-| Disk exhaustion | retention, max DB size, request limits |
-| Query DoS | time range requirements, limits, timeouts |
-| Ingestion flood | bounded queues, 429, drop policy |
-| Secrets in FTS index | redaction rules, sensitive key non-indexing |
-| SQL injection | parameterized queries, structured filters |
-| Corrupt DB from crash | WAL, short transactions, backup/export |
+| Network exposure | Loopback-only validated host |
+| Wrong-process termination | Lock, registry, PID start identity, nonce, health verification |
+| Disk exhaustion | Age/size retention, bounded requests, explicit reset/vacuum |
+| Memory exhaustion | Request-count and byte queue capacity, decompression limit |
+| Query abuse | Required bounded range/limit, typed filters, timeout, no raw SQL |
+| Secret discovery through indexes | Sensitive-key projection deny pattern |
+| Crash corruption | WAL, one writer, short transactions, durable acknowledgement |
