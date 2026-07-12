@@ -34,14 +34,10 @@
 		"lint:fix": "biome check --fix package.json tsconfig.json src",
 		"test": "vitest run src --passWithNoTests"
 	},
-	"dependencies": {
-		"@opentui/core": "0.4.3"
-	},
 	"devDependencies": {
 		"@belfry/config": "workspace:*",
 		"@belfry/daemon": "workspace:*",
 		"@belfry/storage": "workspace:*",
-		"@belfry/tui": "workspace:*",
 		"@belfry/typescript-config": "workspace:*",
 		"@effect/opentelemetry": "4.0.0-beta.97",
 		"@effect/platform-bun": "4.0.0-beta.97",

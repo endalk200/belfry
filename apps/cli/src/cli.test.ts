@@ -10,16 +10,16 @@ import {
 	parseTelemetryEndpointEnv,
 	TELEMETRY_ENV,
 } from "@belfry/config";
-import { DaemonManager } from "@belfry/daemon/lifecycle";
+import { DaemonLifecycleFailure, DaemonManager, type DaemonManagerService } from "@belfry/daemon/lifecycle";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Logger, Path, Stdio, Terminal } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliOutput } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { configValidationHasFailures, formatConfigValidationReport } from "./cli/commands/config/validate.cmd.js";
-import { shouldOpenWebWorkspace } from "./cli/commands/web.cmd.js";
+import { shouldOpenWebWorkspace, startWebWorkspace } from "./cli/commands/web.cmd.js";
 import { runCliWithArgs } from "./cli/run.js";
-import { handleCliFailure, reportTuiFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
+import { handleCliFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
 import {
 	DEFAULT_OTLP_HTTP_ENDPOINT,
 	telemetryLayerFromConfiguration,
@@ -45,16 +45,20 @@ const SpawnerLayer = Layer.succeed(
 	ChildProcessSpawner.make(() => Effect.die("Child process spawning is not implemented in CLI tests")),
 );
 
-const DaemonManagerTestLayer = Layer.succeed(DaemonManager, {
+const DaemonManagerTestService: DaemonManagerService = {
 	status: Effect.succeed({ state: "stopped" as const, message: "test Daemon is stopped" }),
 	withStoppedDaemonLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
 	start: Effect.die("Daemon start is not implemented in CLI unit tests"),
 	stop: Effect.die("Daemon stop is not implemented in CLI unit tests"),
 	restart: Effect.die("Daemon restart is not implemented in CLI unit tests"),
 	serve: Effect.never,
-});
+};
 
-const cliTestLayer = (files: Record<string, string> = {}) =>
+const cliTestLayer = (
+	files: Record<string, string> = {},
+	manager: DaemonManagerService = DaemonManagerTestService,
+	config = defaultBelfryConfiguration,
+) =>
 	Layer.mergeAll(
 		TestConsole.layer,
 		FileSystem.layerNoop({
@@ -70,8 +74,8 @@ const cliTestLayer = (files: Record<string, string> = {}) =>
 		TerminalLayer,
 		CliOutput.layer(CliOutput.defaultFormatter({ colors: false })),
 		SpawnerLayer,
-		DaemonManagerTestLayer,
-		Layer.succeed(BelfryConfig, defaultBelfryConfiguration),
+		Layer.succeed(DaemonManager, manager),
+		Layer.succeed(BelfryConfig, config),
 		Stdio.layerTest({}),
 		withoutConsoleLogger,
 	);
@@ -102,7 +106,12 @@ const withIsolatedBelfryEnvironment = <A, E, R>(effect: Effect.Effect<A, E, R>) 
 		);
 	});
 
-const runBelfryCommand = (args: ReadonlyArray<string>, files: Record<string, string> = {}) =>
+const runBelfryCommand = (
+	args: ReadonlyArray<string>,
+	files: Record<string, string> = {},
+	manager: DaemonManagerService = DaemonManagerTestService,
+	config = defaultBelfryConfiguration,
+) =>
 	Effect.gen(function* () {
 		yield* runCliWithArgs(args);
 
@@ -110,9 +119,47 @@ const runBelfryCommand = (args: ReadonlyArray<string>, files: Record<string, str
 			stdout: yield* TestConsole.logLines,
 			stderr: yield* TestConsole.errorLines,
 		};
-	}).pipe(withIsolatedBelfryEnvironment, Effect.provide(cliTestLayer(files)));
+	}).pipe(withIsolatedBelfryEnvironment, Effect.provide(cliTestLayer(files, manager, config)));
 
 describe("belfry CLI", () => {
+	it.effect("starts the browser Workspace and prints its URL for the bare command", () =>
+		Effect.gen(function* () {
+			const endpoint = "http://127.0.0.1:24318";
+			const manager: DaemonManagerService = {
+				...DaemonManagerTestService,
+				start: Effect.succeed({
+					adopted: false,
+					registry: { version: 1, pid: 42, startedAt: 1, nonce: "test", endpoint },
+				}),
+			};
+			const config = {
+				...defaultBelfryConfiguration,
+				interfaces: { ...defaultBelfryConfiguration.interfaces, webOpenBrowser: false },
+			};
+
+			const { stdout } = yield* runBelfryCommand([], {}, manager, config);
+
+			assert.deepStrictEqual(stdout, [`Belfry web Workspace: ${endpoint}/traces`]);
+		}),
+	);
+
+	it.effect("propagates Daemon startup failure from the bare command", () =>
+		Effect.gen(function* () {
+			const expected = new DaemonLifecycleFailure({
+				code: "start_timeout",
+				message: "The test Daemon did not become ready.",
+			});
+			const manager: DaemonManagerService = {
+				...DaemonManagerTestService,
+				start: Effect.fail(expected),
+			};
+
+			const failure = yield* Effect.flip(runBelfryCommand([], {}, manager));
+
+			assert.strictEqual(failure, expected);
+		}),
+	);
+
 	it.effect("prints root help when explicitly requested", () =>
 		Effect.gen(function* () {
 			const { stdout } = yield* runBelfryCommand(["--help"]);
@@ -313,15 +360,39 @@ describe("belfry CLI", () => {
 		assert.strictEqual(shouldOpenWebWorkspace(true, true), false);
 	});
 
+	it.effect("launches the browser when Workspace auto-open is configured", () =>
+		Effect.gen(function* () {
+			const endpoint = "http://127.0.0.1:24318";
+			const manager: DaemonManagerService = {
+				...DaemonManagerTestService,
+				start: Effect.succeed({
+					adopted: true,
+					registry: { version: 1, pid: 42, startedAt: 1, nonce: "test", endpoint },
+				}),
+			};
+			let launchedUrl: string | undefined;
+
+			yield* startWebWorkspace({
+				noOpen: false,
+				launchBrowser: (url) =>
+					Effect.sync(() => {
+						launchedUrl = url;
+					}),
+			}).pipe(Effect.provide(cliTestLayer({}, manager)));
+
+			assert.strictEqual(launchedUrl, `${endpoint}/traces`);
+		}),
+	);
+
 	it.effect("prints CLI failures to stderr through the failure reporting module", () =>
 		Effect.gen(function* () {
 			const error = new InvalidConfigPath({ value: "" });
 			yield* Effect.flip(handleCliFailure.InvalidConfigPath(error));
-			yield* reportTuiFailure({
-				_tag: "TuiFailure",
-				code: "session_write_failed",
-				message: "Could not save the TUI Workspace session.",
-			} as Parameters<typeof reportTuiFailure>[0]);
+			yield* Effect.flip(
+				handleCliFailure.DaemonLifecycleFailure(
+					new DaemonLifecycleFailure({ code: "start_timeout", message: "The Daemon did not become ready." }),
+				),
+			);
 			yield* Effect.flip(
 				handleCliFailure.WebBrowserFailure({
 					_tag: "WebBrowserFailure",
@@ -334,7 +405,7 @@ describe("belfry CLI", () => {
 
 			assert.deepStrictEqual(stderr, [
 				'Invalid BELFRY_CONFIG_PATH value "". Expected a non-empty path.',
-				"Could not save the TUI Workspace session.",
+				"The Daemon did not become ready.",
 				"Could not open the browser. Open the URL manually.",
 			]);
 		}).pipe(Effect.provide(TestConsole.layer)),

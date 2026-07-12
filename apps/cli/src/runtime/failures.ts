@@ -1,6 +1,5 @@
 import { formatConfigError } from "@belfry/config";
 import type { DaemonLifecycleFailure } from "@belfry/daemon/lifecycle";
-import type { TuiFailure } from "@belfry/tui";
 import { Cause, Console, Data, Effect } from "effect";
 
 import type { DatabaseOperationFailure } from "../cli/commands/database/index.js";
@@ -35,9 +34,7 @@ export const handleCliFailure = {
 	WebBrowserFailure: (error: WebBrowserFailure) => printAndFail(error, error.message),
 } as const;
 
-export const reportTuiFailure = (error: TuiFailure) => Console.error(error.message);
-
-const handledCliFailureTags = new Set([...Object.keys(handleCliFailure), "TuiFailure"]);
+const handledCliFailureTags = new Set(Object.keys(handleCliFailure));
 
 const isHandledCliFailure = (error: unknown): boolean =>
 	typeof error === "object" &&

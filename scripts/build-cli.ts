@@ -30,7 +30,6 @@ run("bun", [
 	"--target=bun",
 	"--format=esm",
 	"--packages=bundle",
-	"--external=@opentui/core",
 	`--outfile=${join(distDirectory, "bin.js")}`,
 ]);
 

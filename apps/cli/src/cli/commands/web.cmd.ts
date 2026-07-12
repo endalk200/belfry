@@ -8,16 +8,23 @@ export const webCommand = Command.make(
 	{
 		noOpen: Flag.boolean("no-open").pipe(Flag.withDescription("Start the web Workspace without opening a browser")),
 	},
-	({ noOpen }) =>
-		Effect.gen(function* () {
-			const manager = yield* DaemonManager;
-			const config = yield* BelfryConfig;
-			const { registry } = yield* manager.start;
-			const url = `${registry.endpoint}/traces`;
-			if (shouldOpenWebWorkspace(config.interfaces.webOpenBrowser, noOpen)) yield* openBrowser(url);
-			yield* Console.log(`Belfry web Workspace: ${url}`);
-		}),
+	({ noOpen }) => startWebWorkspace({ noOpen }),
 ).pipe(Command.withDescription("Start or adopt the Daemon and open the browser Workspace"));
+
+export type StartWebWorkspaceOptions = {
+	readonly noOpen: boolean;
+	readonly launchBrowser?: typeof openBrowser | undefined;
+};
+
+export const startWebWorkspace = ({ noOpen, launchBrowser = openBrowser }: StartWebWorkspaceOptions) =>
+	Effect.gen(function* () {
+		const manager = yield* DaemonManager;
+		const config = yield* BelfryConfig;
+		const { registry } = yield* manager.start;
+		const url = `${registry.endpoint}/traces`;
+		if (shouldOpenWebWorkspace(config.interfaces.webOpenBrowser, noOpen)) yield* launchBrowser(url);
+		yield* Console.log(`Belfry web Workspace: ${url}`);
+	});
 
 export const shouldOpenWebWorkspace = (configuredAutoOpen: boolean, noOpen: boolean): boolean =>
 	configuredAutoOpen && !noOpen;
