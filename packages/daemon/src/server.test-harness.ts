@@ -284,9 +284,8 @@ const result = await Effect.runPromise(
 			)) as {
 				paths: Record<string, unknown>;
 			};
-			const docs = yield* Effect.promise(() =>
-				fetch(`${daemon.endpoint}/docs/belfry-debug`).then((r) => r.text()),
-			);
+			const removedDocs = yield* Effect.promise(() => fetch(`${daemon.endpoint}/docs/belfry-debug`));
+			const removedDocsApi = yield* Effect.promise(() => fetch(`${daemon.endpoint}/api/docs`));
 			const degradedDaemon = yield* startDaemonServer({ configuration: degradedConfiguration });
 			const degradedHealthResponse = yield* Effect.promise(() => fetch(`${degradedDaemon.endpoint}/api/health`));
 			const degradedHealth = (yield* Effect.promise(() => degradedHealthResponse.json())) as {
@@ -294,7 +293,6 @@ const result = await Effect.runPromise(
 				writerReady: boolean;
 				readsAvailable: boolean;
 			};
-			const degradedDocs = yield* Effect.promise(() => fetch(`${degradedDaemon.endpoint}/docs/troubleshooting`));
 			const degradedQuery = yield* Effect.promise(() =>
 				fetch(`${degradedDaemon.endpoint}/api/traces/search`, {
 					method: "POST",
@@ -432,12 +430,12 @@ const result = await Effect.runPromise(
 				diagnosticsHasCursor: typeof diagnosticsFirst.nextCursor === "string",
 				diagnosticsSecondCount: diagnosticsSecond.items.length,
 				openapiHasTraceSearch: Object.hasOwn(openapi.paths, "/api/traces/search"),
-				docsHasEvidenceWorkflow: docs.includes("evidence-first"),
+				removedDocsStatus: removedDocs.status,
+				removedDocsApiStatus: removedDocsApi.status,
 				degradedHealthStatus: degradedHealthResponse.status,
 				degradedStatus: degradedHealth.status,
 				degradedWriterReady: degradedHealth.writerReady,
 				degradedReadsAvailable: degradedHealth.readsAvailable,
-				degradedDocsStatus: degradedDocs.status,
 				degradedQueryStatus: degradedQuery.status,
 				degradedQueryCode: degradedQueryBody.code,
 				degradedQueryMessage: degradedQueryBody.message,

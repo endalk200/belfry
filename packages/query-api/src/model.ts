@@ -234,16 +234,4 @@ export const DiagnosticSchema = Schema.Struct({
 export type Diagnostic = typeof DiagnosticSchema.Type;
 export const DiagnosticPageSchema = pageSchema(DiagnosticSchema, "DiagnosticPage");
 
-export const DocumentationEntrySchema = Schema.Struct({
-	slug: Schema.String,
-	title: Schema.String,
-	description: Schema.String,
-	href: Schema.String,
-});
-export const DocumentationIndexSchema = Schema.Struct({
-	items: Schema.Array(DocumentationEntrySchema),
-	openapi: Schema.String,
-	debuggingSkill: Schema.String,
-});
-
 export { LogDetailSchema, SpanDetailSchema, TraceDetailSchema, TraceSpanDetailSchema };

@@ -18,7 +18,6 @@ import {
 import {
 	BoundedLimitSchema,
 	DiagnosticPageSchema,
-	DocumentationIndexSchema,
 	FacetPageSchema,
 	FacetRequestSchema,
 	HealthSchema,
@@ -147,10 +146,6 @@ class IngestionGroup extends HttpApiGroup.make("ingestion")
 		}),
 	) {}
 
-class DocumentationGroup extends HttpApiGroup.make("documentation").add(
-	HttpApiEndpoint.get("getDocumentationIndex", "/docs", { success: DocumentationIndexSchema }),
-) {}
-
 export class BelfryApi extends HttpApi.make("belfry")
 	.add(HealthGroup)
 	.add(ServicesGroup)
@@ -158,7 +153,6 @@ export class BelfryApi extends HttpApi.make("belfry")
 	.add(LogsGroup)
 	.add(FacetsGroup)
 	.add(IngestionGroup)
-	.add(DocumentationGroup)
 	.middleware(QuerySchemaErrorMiddleware)
 	.prefix("/api")
 	.annotateMerge(

@@ -1,4 +1,3 @@
-import type { DocumentationServiceShape } from "@belfry/docs";
 import type { IngestionAdmissionService } from "@belfry/ingestion";
 import {
 	BelfryApi,
@@ -18,7 +17,6 @@ import { HttpApiBuilder, HttpApiMiddleware } from "effect/unstable/httpapi";
 export type QueryHandlersOptions = {
 	readonly reader: TelemetryReaderService;
 	readonly admission: IngestionAdmissionService;
-	readonly documentation: DocumentationServiceShape;
 	readonly queryTimeoutMs: number;
 	readonly queryMaxLookbackNs: bigint;
 	readonly queryMaxResults: number;
@@ -307,10 +305,6 @@ export const makeQueryApiLayer = (options: QueryHandlersOptions) => {
 			),
 	);
 
-	const DocumentationLive = HttpApiBuilder.group(BelfryApi, "documentation", (handlers) =>
-		handlers.handle("getDocumentationIndex", () => options.documentation.index.pipe(Effect.orDie)),
-	);
-
 	return HttpApiBuilder.layer(BelfryApi, { openapiPath: "/openapi.json" }).pipe(
 		Layer.provide(HealthLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
 		Layer.provide(ServicesLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
@@ -318,7 +312,6 @@ export const makeQueryApiLayer = (options: QueryHandlersOptions) => {
 		Layer.provide(LogsLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
 		Layer.provide(FacetsLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
 		Layer.provide(IngestionLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
-		Layer.provide(DocumentationLive.pipe(Layer.provide(QuerySchemaErrorsLive))),
 	);
 };
 

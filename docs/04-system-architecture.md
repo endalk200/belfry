@@ -15,7 +15,7 @@ loopback Bun Daemon (default 127.0.0.1:4318)
   |-- admission: compressed bytes + bounded queue accounting
   |-- writer worker: decompress, decode, normalize, transact
   |-- Query API: bounded read-only searches and details
-  |-- static web Workspace, packaged docs, OpenAPI
+  |-- static web Workspace and OpenAPI
   v
 SQLite Telemetry Store (WAL)
   ^
@@ -41,7 +41,6 @@ queries responsive while writes are in progress.
 | `@belfry/query-api` | Effect HttpApi schemas, errors, cursors, typed client |
 | `@belfry/workspace` | Renderer-independent state transitions, shared typed client adapter, URL state, waterfall |
 | `@belfry/daemon` | Listener, routes, query handlers, graceful lifecycle |
-| `@belfry/docs` | Packaged operator docs and debugging skill |
 | `@belfry/tui` | OpenTUI renderer and command registry |
 | `@belfry/web` | React/Vite renderer and virtualized waterfall |
 | `@belfry/cli` | Public command surface and Daemon/database orchestration |
@@ -55,9 +54,9 @@ stop signals only the verified process. Stale registries are recovered without
 killing unrelated reused PIDs.
 
 The Daemon attempts writer/migration and read-only Store startup before binding.
-If either Store role is unavailable, it still serves health, documentation, and
-any safely available read role while refusing unsafe ingestion or queries with
-stable errors. Graceful shutdown stops admission, drains already accepted
+If either Store role is unavailable, it still serves health and any safely
+available read role while refusing unsafe ingestion or queries with stable
+errors. Graceful shutdown stops admission, drains already accepted
 requests within the configured deadline, closes the listener, and releases
 registry ownership.
 

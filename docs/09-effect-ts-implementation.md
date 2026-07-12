@@ -9,7 +9,7 @@ Beta API usage was implemented against version-matched dependency source.
 
 Vitest remains the package test runner and Playwright drives the real browser.
 The published npm package contains a Bun-targeted bundled CLI, writer worker,
-web assets, packaged docs, license, and generated debugging skill.
+web assets, and license.
 
 ## Effect service seams
 
@@ -19,8 +19,7 @@ Deep services expose small public contracts for:
 - Daemon lifecycle ownership;
 - OTLP decoding, admission, and writer-worker transport;
 - Telemetry Store writing, querying, retention, and maintenance;
-- Query API handlers and typed client access;
-- packaged documentation.
+- Query API handlers and typed client access.
 
 Expected failures use tagged schema errors at boundaries. Scopes own SQLite
 clients, listeners, workers, lock files, process signals, and graceful cleanup.
@@ -28,9 +27,9 @@ The request handler waits on worker completion without doing synchronous writer
 work itself.
 
 Production startup composes these `Context.Service` contracts through Layers.
-The Daemon builds admission, read-only query, isolated query-worker, and
-documentation Layers in child scopes; failed construction closes the child
-scope immediately. The writer worker builds only the narrow writer, retention,
+The Daemon builds admission, read-only query, and isolated query-worker Layers
+in child scopes; failed construction closes the child scope immediately. The
+writer worker builds only the narrow writer, retention,
 diagnostics, and OTLP-decoder roles over its scoped Store Layer, so its protocol
 handler never receives the broad Store implementation.
 

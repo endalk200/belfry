@@ -22,8 +22,8 @@ belfry database stats
 ```
 
 The default Daemon endpoint is `http://127.0.0.1:4318`. It serves OTLP/HTTP,
-the web Workspace, the bounded Query API, packaged documentation, and OpenAPI
-from the same loopback listener.
+the web Workspace, the bounded Query API, and OpenAPI from the same loopback
+listener.
 
 ## Send telemetry
 
@@ -51,9 +51,9 @@ bun run benchmark:workbench
 
 Start with the [documentation index](docs/00-index.md), the
 [operations guide](docs/11-operations-security.md), or the versioned
-[reference benchmark](docs/benchmarks/README.md). Runtime help is also available
-from `/api/docs`, `/docs/getting-started`, and `/openapi.json` while the Daemon
-is running.
+[reference benchmark](docs/benchmarks/README.md). The Query API schema is
+available from `/openapi.json` while the Daemon is running. The repository's
+agent debugging workflow lives at `skills/belfry-debug/SKILL.md`.
 
 Telemetry can contain secrets and personal data. Belfry stays on loopback and
 does not upload records, but instrumentation is still responsible for safe

@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { type BelfryConfiguration, daemonEndpoint } from "@belfry/config";
-import { Documentation } from "@belfry/docs";
 import { IngestionAdmission, type IngestionAdmissionService, IngestionUnavailable } from "@belfry/ingestion";
 import { StorageFailure, TelemetryQuery, type TelemetryReaderService } from "@belfry/storage";
 import { BunHttpServer } from "@effect/platform-bun";
@@ -10,7 +9,7 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { makeQueryApiLayer } from "./query-handlers.js";
 import { IsolatedTelemetryQuery } from "./query-transport.js";
 import { runRetentionUntilCurrent } from "./retention-schedule.js";
-import { makeDocumentationRoutes, makeOtlpRoutes, makeWebRoutes } from "./routes.js";
+import { makeOtlpRoutes, makeWebRoutes } from "./routes.js";
 
 export type DaemonServerOptions = {
 	readonly configuration: BelfryConfiguration;
@@ -108,7 +107,7 @@ export const startDaemonServer = (
 				: readerResult;
 		const queryUnavailableMessage =
 			queryReaderResult._tag === "Failure" && readerResult._tag === "Success"
-				? "The isolated Query worker is unavailable; health and documentation remain available."
+				? "The isolated Query worker is unavailable; health remains available."
 				: undefined;
 		const reader =
 			readerResult._tag === "Failure"
@@ -131,25 +130,22 @@ export const startDaemonServer = (
 				),
 			);
 		}
-		const documentation = Context.get(yield* Layer.build(Documentation.layer), Documentation);
 		const routes = Layer.mergeAll(
 			makeQueryApiLayer({
 				reader,
 				admission,
-				documentation,
 				queryTimeoutMs: config.query.timeoutMs,
 				queryMaxLookbackNs: config.query.maxLookbackNs,
 				queryMaxResults: config.query.maxResults,
 				writerUnavailableMessage:
 					admissionResult._tag === "Failure"
-						? "The writer is unavailable; reads and documentation remain available when the Store can be opened safely."
+						? "The writer is unavailable; reads remain available when the Store can be opened safely."
 						: undefined,
 				queryUnavailableMessage,
 				cursorSecret,
 				daemonIdentity,
 			}),
 			makeOtlpRoutes(admission, config.ingestion.maxCompressedBytes),
-			makeDocumentationRoutes(documentation),
 			makeWebRoutes(options.webRoot, {
 				refreshIntervalMs: config.interfaces.refreshIntervalMs,
 				defaultRangeMinutes: config.interfaces.defaultRangeMinutes,

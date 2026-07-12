@@ -377,7 +377,6 @@ export function TelemetryWorkbench({
 					<kbd>/</kbd> search · <kbd>r</kbd> refresh · <kbd>p</kbd> pause · <kbd>Esc</kbd> close detail
 				</span>
 				<a href="/openapi.json">OpenAPI</a>
-				<a href="/docs/troubleshooting">Troubleshooting</a>
 			</footer>
 			<div className="notice" aria-live="polite" aria-atomic="true">
 				{notice}

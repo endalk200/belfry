@@ -39,6 +39,6 @@ correlation semantics.
 _Avoid_: UI API, agent API, raw SQL API
 
 **Debugging Skill**:
-Packaged instructions that teach coding agents to discover Belfry and debug
-software using evidence from the Query API.
+Repository-owned instructions under `skills/` that teach coding agents to
+discover Belfry and debug software using evidence from the Query API.
 _Avoid_: MCP server, AI telemetry integration

@@ -53,6 +53,5 @@ run("bun", [
 ]);
 
 await cp(join(repoRoot, "apps", "web", "dist"), join(distDirectory, "web"), { recursive: true });
-await cp(join(repoRoot, "packages", "docs", "content"), join(distDirectory, "content"), { recursive: true });
 
 await chmod(join(distDirectory, "bin.js"), 0o755);

@@ -19,9 +19,8 @@ the shipped system rather than an aspirational all-signal platform.
 11. [Operations, privacy, and security](11-operations-security.md)
 12. [Testing and benchmark evidence](12-testing-roadmap.md)
 
-Architecture decisions live under [ADR](adr/). Packaged operator docs are in
-`packages/docs/content` and are served by the Daemon. Accepted benchmark
-results live under [benchmarks](benchmarks/).
+Architecture decisions live under [ADR](adr/). Agent workflows live under
+`skills/`. Accepted benchmark results live under [benchmarks](benchmarks/).
 
 ## Shipped boundary
 
@@ -31,8 +30,8 @@ results live under [benchmarks](benchmarks/).
 - Service discovery, trace waterfall, log detail, full-text search, facets,
   indexed scalar attributes, and trace/log/span correlation.
 - Shared Workspace behavior across OpenTUI and React/Vite interfaces.
-- Bounded typed Query API, generated OpenAPI, packaged docs, and a debugging
-  skill for coding agents.
+- Bounded typed Query API, generated OpenAPI, and a repository debugging skill
+  for coding agents.
 - Bun runtime, Effect `4.0.0-beta.97`, Vitest, Playwright, and reproducible
   lifecycle/ingest/query/interface benchmarks.
 
