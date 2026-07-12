@@ -44,11 +44,8 @@ if (presentDependencyFields.length > 0) {
 	throw new Error(`@belfry/cli has unexpected dependency fields: ${presentDependencyFields.join(", ")}.`);
 }
 
-if (
-	Object.keys(packageJson.dependencies ?? {}).length !== 1 ||
-	packageJson.dependencies?.["@opentui/core"] !== "0.4.3"
-) {
-	throw new Error("@belfry/cli must publish OpenTUI Core as its sole runtime dependency for native portability.");
+if (Object.keys(packageJson.dependencies ?? {}).length !== 0) {
+	throw new Error("@belfry/cli must bundle its implementation and publish without runtime dependencies.");
 }
 
 const pack = spawnSync("npm", ["pack", "--dry-run", "--json", cliRoot], {

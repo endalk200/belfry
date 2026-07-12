@@ -8,9 +8,12 @@ const rootSpanNameFromArgs = (args: ReadonlyArray<string>): string => {
 	if (args.includes("--version") || args.includes("-v")) {
 		return "belfry.cli.version";
 	}
+	if (args.includes("--help") || args.includes("-h")) {
+		return "belfry.cli.help";
+	}
 
 	const commandArgs = args.filter((arg) => !arg.startsWith("-"));
-	const command = commandArgs.length === 0 ? "help" : commandArgs.join(".");
+	const command = commandArgs.length === 0 ? "web" : commandArgs.join(".");
 
 	return `belfry.cli.${command}`;
 };
