@@ -31,7 +31,7 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 	await expect(page.getByText("Duration ≥ 1.5 ms", { exact: true })).toBeVisible();
 	await expect(page.getByText("Attribute: http.route contains /checkout", { exact: true })).toBeVisible();
 
-	await page.getByRole("button", { name: "Open trace GET /checkout" }).click();
+	await page.locator(".table-row").filter({ hasText: "GET /checkout" }).locator("td.truncate").click();
 	await expect(page).toHaveURL(new RegExp(`/traces/${traceId}`, "u"));
 	await expect(page.getByRole("heading", { name: "Span waterfall" })).toBeVisible();
 	await expect(page.getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/openapi.json");
@@ -107,6 +107,9 @@ test("virtualizes large log results while keeping accessible row controls", asyn
 	const renderedRows = page.locator(".table-row");
 	expect(await renderedRows.count()).toBeLessThan(50);
 	await expect(page.getByRole("button", { name: "payment declined" })).toBeVisible();
+	const paymentRow = renderedRows.filter({ hasText: "payment declined" });
+	await paymentRow.locator("td.truncate").click();
+	await expect(page.getByRole("heading", { name: /payment declined/u })).toBeVisible();
 });
 
 const installApiFixture = async (page: Page): Promise<void> => {

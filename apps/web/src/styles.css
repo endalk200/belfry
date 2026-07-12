@@ -128,13 +128,6 @@ code {
 	font-family: Georgia, serif;
 	border-radius: 4px 4px 10px 4px;
 }
-.local-label {
-	margin-left: 16px;
-	color: var(--faint);
-	font-size: 0.68rem;
-	font-weight: 700;
-	letter-spacing: 0.16em;
-}
 .connection {
 	max-width: min(60vw, 640px);
 	gap: 8px;
@@ -161,15 +154,6 @@ code {
 .connection-unavailable {
 	color: var(--red);
 }
-.connection-message {
-	max-width: 460px;
-	overflow: hidden;
-	color: var(--muted);
-	text-overflow: ellipsis;
-	text-transform: none;
-	white-space: nowrap;
-}
-
 .workspace-bar {
 	min-height: 52px;
 	justify-content: space-between;
@@ -183,6 +167,9 @@ code {
 }
 .signal-tabs button {
 	position: relative;
+	align-self: stretch;
+	display: flex;
+	align-items: center;
 	min-width: 64px;
 	padding: 0 2px;
 	border: 0;
@@ -193,10 +180,11 @@ code {
 .signal-tabs button::after {
 	position: absolute;
 	right: 0;
-	bottom: 0;
+	bottom: -1px;
 	left: 0;
-	height: 2px;
+	height: 3px;
 	background: transparent;
+	border-radius: 2px 2px 0 0;
 	content: "";
 }
 .signal-tabs button.active {
@@ -593,6 +581,10 @@ code {
 	border-bottom: 1px solid var(--border);
 	color: #c9ced0;
 	font-size: 0.78rem;
+}
+.table-row.trace-grid,
+.table-row.log-grid {
+	cursor: pointer;
 }
 .table-row:hover,
 .table-row.selected {
@@ -1260,8 +1252,6 @@ kbd {
 		padding-right: 12px;
 		padding-left: 12px;
 	}
-	.local-label,
-	.connection-message,
 	.endpoint {
 		display: none;
 	}

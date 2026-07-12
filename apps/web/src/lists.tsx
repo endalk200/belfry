@@ -41,6 +41,7 @@ export function TraceList({
 									className={`table-row trace-grid${selected ? " selected" : ""}`}
 									aria-rowindex={window.start + index + 1}
 									key={trace.traceId}
+									onClick={() => onSelect(trace)}
 									style={{ height: traceRowHeight }}
 								>
 									<td>
@@ -54,7 +55,10 @@ export function TraceList({
 									<td className="primary-cell">
 										<button
 											type="button"
-											onClick={() => onSelect(trace)}
+											onClick={(event) => {
+												event.stopPropagation();
+												onSelect(trace);
+											}}
 											aria-label={`Open trace ${trace.rootOperation}`}
 										>
 											{trace.rootOperation || "unnamed operation"}
@@ -111,6 +115,7 @@ export function LogList({
 									className={`table-row log-grid${selected ? " selected" : ""}`}
 									aria-rowindex={window.start + index + 1}
 									key={log.id}
+									onClick={() => onSelect(log)}
 									style={{ height: logRowHeight }}
 								>
 									<td>
@@ -130,7 +135,10 @@ export function LogList({
 									<td className="primary-cell">
 										<button
 											type="button"
-											onClick={() => onSelect(log)}
+											onClick={(event) => {
+												event.stopPropagation();
+												onSelect(log);
+											}}
 											aria-expanded={selected}
 											aria-controls="log-detail"
 										>
