@@ -17,8 +17,7 @@
   acknowledgement, write latency, and post-start worker-crash readiness.
 - Daemon tests bind real loopback listeners for lifecycle ownership, graceful
   drain, routes, web assets, docs, and OpenAPI.
-- TUI tests use component and real-PTY harnesses; web workflows use Playwright
-  at desktop and narrow viewports.
+- Web workflows use Playwright at desktop and narrow viewports.
 - Release tests pack the public npm artifact, audit its allowlist, install it in
   a clean project, and exercise the installed executable.
 
@@ -31,22 +30,24 @@ verifies canonical identities, Services, and correlation.
 
 ## Reference benchmark
 
-`bun run benchmark:workbench` exercises the built public CLI, real `/usr/bin/expect`
-PTYs, a foreground Daemon, SQLite, HTTP, and headless Chrome. It visibly fails
-with a non-zero exit when a threshold regresses.
+`bun run benchmark:workbench` exercises the built public CLI, cold and warm
+Daemon-ready Workspace URL latency, a foreground Daemon, SQLite, HTTP, and
+headless Chrome. It visibly fails with a non-zero exit when a threshold
+regresses.
 
 The dataset contains 100 traces / 6,400 spans, 8,000 logs, and a separate
-1,000-span trace. It measures three cold first frames, five warm adoptions,
-three fresh ingest trials, warmed recent/FTS queries, concurrent health/query
-traffic during ingest, API/detail interaction, virtualized row count, repeated
-ingest RSS, repeated web refresh heap, queue drain, and live database size.
+1,000-span trace. It measures three cold Workspace starts, five warm Workspace
+adoptions, three fresh ingest trials, warmed recent/FTS queries, concurrent
+health/query traffic during ingest, API/detail interaction, virtualized row
+count, repeated ingest RSS, repeated web refresh heap, queue drain, and live
+database size.
 
 Accepted thresholds are:
 
 | Guardrail | Threshold |
 | --- | ---: |
-| Fresh Daemon + first TUI frame, median | `< 750 ms` |
-| Warm Daemon adoption, median | `< 250 ms` |
+| Fresh Daemon + Workspace URL, median | `< 750 ms` |
+| Warm Daemon adoption + Workspace URL, median | `< 250 ms` |
 | 6,400 spans, median | `< 2,000 ms` |
 | 8,000 logs, median | `< 500 ms` |
 | Recent/indexed query median / p95 | `< 100 / 250 ms` |
