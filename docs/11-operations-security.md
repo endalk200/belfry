@@ -47,8 +47,8 @@ Use `belfry config init`, `belfry config validate`, and `belfry config path` to
 manage the file. The `BELFRY_TELEMETRY` settings control Belfry's opt-in export
 of its own internal telemetry; they do not control the local receiver.
 The `[interfaces]` settings are authoritative for `refresh_interval_ms`,
-`default_range_minutes`, and `web_open_browser`; both renderers display and use
-the configured range/cadence, while `belfry web --no-open` remains an explicit
+`default_range_minutes`, and `web_open_browser`; the browser Workspace uses the
+configured range/cadence, while `belfry web --no-open` remains an explicit
 one-run override.
 
 All operational safety limits are regular TOML keys and are checked by

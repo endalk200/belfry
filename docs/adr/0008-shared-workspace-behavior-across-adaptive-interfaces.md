@@ -1,6 +1,6 @@
 # Shared Workspace Behavior Across Adaptive Interfaces
 
-Status: Accepted
+Status: Superseded by [0011 Web Workspace as the Shipped Interactive Interface](./0011-web-workspace-as-shipped-interface.md)
 
 Belfry's web and terminal interfaces provide behavioral parity for the core
 trace and log workflows while using layouts and controls suited to each medium.

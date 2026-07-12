@@ -1,6 +1,6 @@
 # Machine-Wide Daemon and Telemetry Store
 
-Status: Accepted
+Status: Amended by [0011 Web Workspace as the Shipped Interactive Interface](./0011-web-workspace-as-shipped-interface.md)
 
 Belfry runs one managed Daemon and one SQLite Telemetry Store per developer
 machine. Invoking `belfry` or `belfry web` starts or adopts that Daemon before

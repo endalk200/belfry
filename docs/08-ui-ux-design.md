@@ -1,12 +1,10 @@
-# Web and Terminal UX
+# Browser Workspace UX
 
 ## Shared Workspace behavior
 
-The browser and terminal are separate renderers over `@belfry/workspace`.
-Shared state owns the active signal, Service Filter, bounded trace/log queries,
-selection, navigation history, refresh pause, collapsed spans, correlation, and
-waterfall structure. This provides behavioral parity without forcing identical
-layouts.
+The browser renderer consumes `@belfry/workspace`. Shared state owns the active
+signal, Service Filter, bounded trace/log queries, selection, navigation
+history, refresh pause, collapsed spans, correlation, and waterfall structure.
 
 The default range is the configured `interfaces.default_range_minutes` (15
 minutes out of the box), and refresh uses
@@ -31,32 +29,6 @@ The React/Vite interface provides:
 Only visible waterfall/list windows plus overscan are rendered. A 1,000-span
 trace therefore remains interactive without creating 1,000 DOM rows.
 
-## Terminal Workspace
-
-OpenTUI adapts panes to terminal dimensions and retains complete detail rather
-than clipping to list previews. Its command registry is the source of truth:
-
-| Keys | Action |
-| --- | --- |
-| `↑`/`k`, `↓`/`j` | Move selection |
-| `Enter`, `Esc`/`Backspace` | Open and back |
-| `Tab` | Switch traces/logs |
-| `/`, `s`, `f` | Text search, cycle Service Filter, and edit visible structured filters |
-| `a` | Promote the next scalar detail attribute to an exact filter |
-| `o`, `g` | Cycle sort order and bounded time range |
-| `r`, `p` | Refresh and pause/resume |
-| `x`, `z` | Collapse/expand the selected span and change waterfall scale |
-| `v`, `l`, `t` | Open all trace logs, selected-span logs, or a log's correlated trace |
-| `y`, `b`, `d` | Copy the active ID, open the browser Workspace, or inspect ingestion diagnostics |
-| `?`, `q` | Help or close TUI |
-
-Quitting the TUI closes only that client. It does not stop the Daemon.
-The structured-filter pane exposes trace operation, status, minimum and maximum
-duration, trace/span identity, minimum and maximum log severity, and exact
-scalar attributes. Its clear action also removes text and Service filters while
-preserving range and sort. Active filters remain visible above results, and
-`a` promotes a scalar span/log attribute from the current detail view.
-
 ## Data and error states
 
 Loading, empty, stale/reconnecting, invalid-filter, and unavailable-store states
@@ -65,5 +37,4 @@ readiness, and read availability. Structural trace defects are warnings in the
 waterfall, not reasons to hide telemetry.
 
 The web workflows are covered in Playwright at desktop and narrow viewport
-sizes. The TUI command model and renderer are exercised through a real PTY
-harness as well as component tests.
+sizes.

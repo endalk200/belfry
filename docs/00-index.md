@@ -13,7 +13,7 @@ the shipped system rather than an aspirational all-signal platform.
 5. [SQLite storage](05-sqlite-storage-design.md)
 6. [Ingestion pipeline](06-ingestion-pipeline.md)
 7. [Query, search, and correlation](07-query-search-correlation.md)
-8. [Web and terminal UX](08-ui-ux-design.md)
+8. [Browser Workspace UX](08-ui-ux-design.md)
 9. [Effect and Bun implementation](09-effect-ts-implementation.md)
 10. [Query API](10-api-design.md)
 11. [Operations, privacy, and security](11-operations-security.md)
@@ -29,7 +29,7 @@ Architecture decisions live under [ADR](adr/). Agent workflows live under
 - Durable SQLite/WAL storage with bounded retention and exact nanosecond values.
 - Service discovery, trace waterfall, log detail, full-text search, facets,
   indexed scalar attributes, and trace/log/span correlation.
-- Shared Workspace behavior across OpenTUI and React/Vite interfaces.
+- A React/Vite Workspace over renderer-independent state and query modules.
 - Bounded typed Query API, generated OpenAPI, and a repository debugging skill
   for coding agents.
 - Bun runtime, Effect `4.0.0-beta.97`, Vitest, Playwright, and reproducible

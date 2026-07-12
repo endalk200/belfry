@@ -26,7 +26,7 @@ benchmarks rather than isolated microbenchmarks.
 
 - SQLite/WAL persistence instead of an in-memory local history.
 - One Bun Daemon shared by local projects instead of one backend per project.
-- A terminal Workspace and browser Workspace with shared behavior.
+- A browser Workspace over renderer-independent behavior.
 - A bounded Query API for interfaces, scripts, and coding agents.
 - Explicit request, decompression, queue, query, indexing, and retention limits.
 
