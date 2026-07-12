@@ -6,8 +6,7 @@ import { PulseIcon } from "./icons.js";
 import { serviceColor } from "./palette.js";
 import { useVirtualWindow } from "./virtual-list.js";
 
-const traceRowHeight = 46;
-const logRowHeight = 54;
+const rowHeight = 46;
 
 export function TraceList({
 	items,
@@ -19,74 +18,76 @@ export function TraceList({
 	readonly onSelect: (trace: TraceSummary) => void;
 }) {
 	const container = useRef<HTMLDivElement>(null);
-	const window = useVirtualWindow(container, items.length, traceRowHeight);
+	const window = useVirtualWindow(container, items.length, rowHeight);
 	return (
-		<section className="result-table" aria-label="Trace results">
-			<div className="virtual-scroll" ref={container}>
-				<table className="virtual-table" aria-label="Trace results" aria-rowcount={items.length}>
-					<thead>
-						<tr className="table-header trace-grid">
-							<th scope="col">Start</th>
-							<th scope="col">Service</th>
-							<th scope="col">Operation</th>
-							<th scope="col">Duration</th>
-							<th scope="col">Status</th>
-							<th scope="col">Spans</th>
-						</tr>
-					</thead>
-					<tbody>
-						<VirtualGap height={window.offset} columns={6} />
-						{items.slice(window.start, window.end).map((trace, index) => {
-							const selected = trace.traceId === selectedTraceId;
-							return (
-								<tr
-									className={`table-row trace-grid${selected ? " selected" : ""}`}
-									aria-rowindex={window.start + index + 1}
-									key={trace.traceId}
-									onClick={() => onSelect(trace)}
-									style={{ height: traceRowHeight }}
-								>
-									<td>
+		<div className="virtual-scroll" ref={container}>
+			<table className="virtual-table" aria-label="Trace results" aria-rowcount={items.length}>
+				<thead className="sr-only">
+					<tr>
+						<th scope="col">Status</th>
+						<th scope="col">Operation and Services</th>
+						<th scope="col">Duration and start</th>
+					</tr>
+				</thead>
+				<tbody>
+					<VirtualGap height={window.offset} columns={3} />
+					{items.slice(window.start, window.end).map((trace, index) => {
+						const selected = trace.traceId === selectedTraceId;
+						return (
+							<tr
+								className={`table-row${selected ? " selected" : ""}`}
+								aria-rowindex={window.start + index + 1}
+								key={trace.traceId}
+								onClick={() => onSelect(trace)}
+								style={{ height: rowHeight }}
+							>
+								<td className="row-status">
+									<span
+										className={`status-dot ${trace.errorCount > 0 ? "err" : trace.active ? "run" : "ok"}`}
+										title={trace.errorCount > 0 ? "Error" : trace.active ? "Running" : "OK"}
+									/>
+								</td>
+								<td className="row-primary">
+									<button
+										type="button"
+										onClick={(event) => {
+											event.stopPropagation();
+											onSelect(trace);
+										}}
+										aria-label={`Open trace ${trace.rootOperation}`}
+										aria-current={selected ? "true" : undefined}
+									>
+										{trace.rootOperation || "unnamed operation"}
+									</button>
+									<small title={trace.services.map(formatService).join(", ")}>
+										{trace.services.map((service) => (
+											<span className="service-tag" key={formatService(service)}>
+												<span
+													className="service-dot"
+													aria-hidden="true"
+													style={{ backgroundColor: serviceColor(service.name) }}
+												/>
+												{service.name}
+											</span>
+										))}
+									</small>
+								</td>
+								<td className="row-meta">
+									<strong>{formatNanoseconds(trace.durationNs)}</strong>
+									<small>
+										{trace.spanCount} {trace.spanCount === 1 ? "span" : "spans"} ·{" "}
 										<time dateTime={isoTime(trace.startTimeNs)}>
 											{compactTime(trace.startTimeNs)}
 										</time>
-									</td>
-									<td className="truncate" title={trace.services.map(formatService).join(", ")}>
-										<span
-											className="service-dot"
-											aria-hidden="true"
-											style={{
-												backgroundColor: serviceColor(trace.services[0]?.name ?? ""),
-											}}
-										/>
-										{trace.services.map((service) => service.name).join(" + ")}
-									</td>
-									<td className="primary-cell">
-										<button
-											type="button"
-											onClick={(event) => {
-												event.stopPropagation();
-												onSelect(trace);
-											}}
-											aria-label={`Open trace ${trace.rootOperation}`}
-										>
-											{trace.rootOperation || "unnamed operation"}
-										</button>
-										<code>{trace.traceId}</code>
-									</td>
-									<td className="numeric">{formatNanoseconds(trace.durationNs)}</td>
-									<td>
-										<StatusBadge error={trace.errorCount > 0} active={trace.active} />
-									</td>
-									<td className="numeric">{trace.spanCount}</td>
-								</tr>
-							);
-						})}
-						<VirtualGap height={window.totalHeight - window.end * traceRowHeight} columns={6} />
-					</tbody>
-				</table>
-			</div>
-		</section>
+									</small>
+								</td>
+							</tr>
+						);
+					})}
+					<VirtualGap height={window.totalHeight - window.end * rowHeight} columns={3} />
+				</tbody>
+			</table>
+		</div>
 	);
 }
 
@@ -100,84 +101,76 @@ export function LogList({
 	readonly onSelect: (log: LogSummary) => void;
 }) {
 	const container = useRef<HTMLDivElement>(null);
-	const window = useVirtualWindow(container, items.length, logRowHeight);
+	const window = useVirtualWindow(container, items.length, rowHeight);
 	return (
-		<section className="result-table" aria-label="Log results">
-			<div className="virtual-scroll" ref={container}>
-				<table className="virtual-table" aria-label="Log results" aria-rowcount={items.length}>
-					<thead>
-						<tr className="table-header log-grid">
-							<th scope="col">Timestamp</th>
-							<th scope="col">Service</th>
-							<th scope="col">Severity</th>
-							<th scope="col">Body</th>
-							<th scope="col">Context</th>
-						</tr>
-					</thead>
-					<tbody>
-						<VirtualGap height={window.offset} columns={5} />
-						{items.slice(window.start, window.end).map((log, index) => {
-							const selected = log.id === selectedLogId;
-							const timestamp = log.timestampNs ?? log.observedTimeNs;
-							return (
-								<tr
-									className={`table-row log-grid${selected ? " selected" : ""}`}
-									aria-rowindex={window.start + index + 1}
-									key={log.id}
-									onClick={() => onSelect(log)}
-									style={{ height: logRowHeight }}
-								>
-									<td>
-										<time
-											dateTime={timestamp === undefined ? undefined : isoTime(timestamp)}
-											title={formatTimestamp(timestamp)}
-										>
-											{timestamp === undefined ? "—" : compactTime(timestamp)}
-										</time>
-									</td>
-									<td className="truncate" title={formatService(log.service)}>
-										<span
-											className="service-dot"
-											aria-hidden="true"
-											style={{ backgroundColor: serviceColor(log.service.name) }}
-										/>
-										{log.service.name}
-									</td>
-									<td>
-										<SeverityBadge number={log.severityNumber} text={log.severityText} />
-									</td>
-									<td className="primary-cell">
-										<button
-											type="button"
-											onClick={(event) => {
-												event.stopPropagation();
-												onSelect(log);
-											}}
-											aria-expanded={selected}
-											aria-controls="log-detail"
-										>
-											{log.bodyPreview || "empty log body"}
-										</button>
-										<code>{log.id}</code>
-									</td>
-									<td className="context-cell">
-										{log.traceId === undefined ? (
-											"Uncorrelated"
-										) : (
-											<>
-												<span>Trace</span>
-												<code>{log.traceId.slice(0, 10)}…</code>
-											</>
+		<div className="virtual-scroll" ref={container}>
+			<table className="virtual-table" aria-label="Log results" aria-rowcount={items.length}>
+				<thead className="sr-only">
+					<tr>
+						<th scope="col">Severity</th>
+						<th scope="col">Body and Service</th>
+						<th scope="col">Timestamp</th>
+					</tr>
+				</thead>
+				<tbody>
+					<VirtualGap height={window.offset} columns={3} />
+					{items.slice(window.start, window.end).map((log, index) => {
+						const selected = log.id === selectedLogId;
+						const timestamp = log.timestampNs ?? log.observedTimeNs;
+						return (
+							<tr
+								className={`table-row${selected ? " selected" : ""}`}
+								aria-rowindex={window.start + index + 1}
+								key={log.id}
+								onClick={() => onSelect(log)}
+								style={{ height: rowHeight }}
+							>
+								<td className="row-status">
+									<SeverityBadge number={log.severityNumber} text={log.severityText} />
+								</td>
+								<td className="row-primary">
+									<button
+										type="button"
+										onClick={(event) => {
+											event.stopPropagation();
+											onSelect(log);
+										}}
+										aria-expanded={selected}
+										aria-controls="log-detail"
+									>
+										{log.bodyPreview || "empty log body"}
+									</button>
+									<small title={formatService(log.service)}>
+										<span className="service-tag">
+											<span
+												className="service-dot"
+												aria-hidden="true"
+												style={{ backgroundColor: serviceColor(log.service.name) }}
+											/>
+											{log.service.name}
+										</span>
+										{log.traceId === undefined ? null : (
+											<span className="trace-tag">
+												trace <code>{log.traceId.slice(0, 8)}…</code>
+											</span>
 										)}
-									</td>
-								</tr>
-							);
-						})}
-						<VirtualGap height={window.totalHeight - window.end * logRowHeight} columns={5} />
-					</tbody>
-				</table>
-			</div>
-		</section>
+									</small>
+								</td>
+								<td className="row-meta">
+									<time
+										dateTime={timestamp === undefined ? undefined : isoTime(timestamp)}
+										title={formatTimestamp(timestamp)}
+									>
+										{timestamp === undefined ? "—" : compactTime(timestamp)}
+									</time>
+								</td>
+							</tr>
+						);
+					})}
+					<VirtualGap height={window.totalHeight - window.end * rowHeight} columns={3} />
+				</tbody>
+			</table>
+		</div>
 	);
 }
 
@@ -224,12 +217,6 @@ export function EmptyResults({
 		</div>
 	);
 }
-
-const StatusBadge = ({ error, active }: { readonly error: boolean; readonly active: boolean }) => (
-	<span className={`badge ${error ? "badge-error" : active ? "badge-active" : "badge-ok"}`}>
-		{error ? "Error" : active ? "Running" : "OK"}
-	</span>
-);
 
 const SeverityBadge = ({ number, text }: { readonly number?: number; readonly text?: string }) => {
 	const level = number === undefined ? "unknown" : number >= 17 ? "error" : number >= 13 ? "warn" : "info";

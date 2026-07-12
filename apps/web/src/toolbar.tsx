@@ -1,10 +1,11 @@
 import type { LogSearchQuery, ServiceSummary, TraceSearchQuery } from "@belfry/query-api";
 import { type ServiceIdentity, serviceIdentityKey } from "@belfry/telemetry";
 import { formatService, type WorkspaceSignal, type WorkspaceState } from "@belfry/workspace";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdvancedFilters, countAdvancedFilters, formatMilliseconds } from "./advanced-filters.js";
-import { ChevronDownIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon } from "./icons.js";
+import { ChevronDownIcon, CloseIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon } from "./icons.js";
+import { serviceColor } from "./palette.js";
 
 export type WorkbenchPhase = "loading" | "ready" | "stale" | "invalid" | "reconnecting" | "unavailable";
 
@@ -12,7 +13,6 @@ export type WorkspaceToolbarProps = {
 	readonly workspace: WorkspaceState;
 	readonly services: ReadonlyArray<ServiceSummary>;
 	readonly phase: WorkbenchPhase;
-	readonly endpoint: string;
 	readonly maxRangeMinutes: number;
 	readonly onSignal: (signal: WorkspaceSignal) => void;
 	readonly onSearch: (value: string | undefined) => void;
@@ -30,7 +30,6 @@ export function WorkspaceToolbar({
 	workspace,
 	services,
 	phase,
-	endpoint,
 	maxRangeMinutes,
 	onSignal,
 	onSearch,
@@ -57,6 +56,8 @@ export function WorkspaceToolbar({
 		: [activeRangeMinutes, ...standardRanges];
 	const [search, setSearch] = useState(query.text ?? "");
 	const [serviceSearch, setServiceSearch] = useState("");
+	const servicePickerRef = useRef<HTMLDetailsElement>(null);
+	const serviceSearchRef = useRef<HTMLInputElement>(null);
 	const selectedKeys = useMemo(
 		() => new Set(workspace.serviceFilter.map(serviceIdentityKey)),
 		[workspace.serviceFilter],
@@ -77,40 +78,63 @@ export function WorkspaceToolbar({
 				: workspace.serviceFilter.filter((item) => serviceIdentityKey(item) !== key),
 		);
 	};
+	const removeService = (service: ServiceIdentity) => toggleService(service, false);
+	const removeAttribute = (target: { key: string; operator: string; value: string }) => {
+		const attributes = query.attributes.filter(
+			(filter) =>
+				!(filter.key === target.key && filter.operator === target.operator && filter.value === target.value),
+		);
+		if (workspace.signal === "traces") onTraceQuery({ attributes });
+		else onLogQuery({ attributes });
+	};
 	const advancedFilterCount = countAdvancedFilters(workspace);
+	const hasActiveFilters = workspace.serviceFilter.length > 0 || query.text !== undefined || advancedFilterCount > 0;
 
 	useEffect(() => {
 		const dismiss = (event: PointerEvent) => {
 			if (!(event.target instanceof Node)) return;
-			for (const picker of document.querySelectorAll<HTMLDetailsElement>(
-				"details.service-picker[open], details.advanced-picker[open]",
-			)) {
+			for (const picker of openPickers()) {
 				if (!picker.contains(event.target)) picker.open = false;
 			}
 		};
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			for (const picker of openPickers()) {
+				picker.open = false;
+				picker.querySelector("summary")?.focus();
+				event.stopPropagation();
+			}
+		};
 		document.addEventListener("pointerdown", dismiss);
-		return () => document.removeEventListener("pointerdown", dismiss);
+		document.addEventListener("keydown", closeOnEscape, true);
+		return () => {
+			document.removeEventListener("pointerdown", dismiss);
+			document.removeEventListener("keydown", closeOnEscape, true);
+		};
+	}, []);
+
+	// Focus the Service search as soon as the picker opens.
+	useEffect(() => {
+		const picker = servicePickerRef.current;
+		if (picker === null) return;
+		const onToggle = () => {
+			if (picker.open) serviceSearchRef.current?.focus();
+		};
+		picker.addEventListener("toggle", onToggle);
+		return () => picker.removeEventListener("toggle", onToggle);
 	}, []);
 
 	return (
 		<>
-			<header className="topbar">
-				<div className="brand-block">
-					<a className="brand" href="/traces" aria-label="Belfry trace workspace">
-						<span className="brand-mark" aria-hidden="true">
-							B
-						</span>
-						<span>Belfry</span>
-					</a>
-				</div>
-				<div className={`connection connection-${phase}`} role="status" aria-live="polite">
-					<span className="connection-glyph" aria-hidden="true" />
-					<span>{phase === "ready" ? "Live" : phase}</span>
-				</div>
-			</header>
+			<header className="command-bar">
+				<a className="brand" href="/traces" aria-label="Belfry trace workspace">
+					<span className="brand-mark" aria-hidden="true">
+						B
+					</span>
+					<span className="brand-name">Belfry</span>
+				</a>
 
-			<div className="workspace-bar">
-				<nav className="signal-tabs" aria-label="Telemetry signal">
+				<nav className="signal-switch" aria-label="Telemetry signal">
 					<button
 						type="button"
 						className={workspace.signal === "traces" ? "active" : undefined}
@@ -128,12 +152,7 @@ export function WorkspaceToolbar({
 						Logs
 					</button>
 				</nav>
-				<span className="endpoint" title={endpoint}>
-					OTLP {endpoint}
-				</span>
-			</div>
 
-			<section className="filters" aria-label="Workspace filters">
 				<form className="search-form" aria-label={`Search ${workspace.signal}`} onSubmit={submit}>
 					<label className="sr-only" htmlFor="telemetry-search">
 						Search {workspace.signal}
@@ -151,12 +170,22 @@ export function WorkspaceToolbar({
 								: "Log body, trace ID, or attribute…"
 						}
 					/>
-					<button type="submit">Apply</button>
+					{search.trim() === "" ? (
+						<kbd className="search-hint">/</kbd>
+					) : (
+						<button
+							type="submit"
+							className="search-submit"
+							aria-label={`Apply ${workspace.signal === "traces" ? "trace" : "log"} search`}
+						>
+							Apply
+						</button>
+					)}
 				</form>
 
-				<details className="service-picker">
+				<details className="picker service-picker" ref={servicePickerRef}>
 					<summary aria-label={`Filter Services, ${workspace.serviceFilter.length} selected`}>
-						Services{" "}
+						Services
 						<span className={workspace.serviceFilter.length > 0 ? "filter-count engaged" : "filter-count"}>
 							{workspace.serviceFilter.length || "all"}
 						</span>
@@ -164,13 +193,16 @@ export function WorkspaceToolbar({
 							<ChevronDownIcon />
 						</span>
 					</summary>
-					<div className="service-popover">
-						<label htmlFor="service-search">Find a Service</label>
+					<div className="popover service-popover">
+						<label className="sr-only" htmlFor="service-search">
+							Find a Service
+						</label>
 						<input
 							id="service-search"
+							ref={serviceSearchRef}
 							value={serviceSearch}
 							onChange={(event) => setServiceSearch(event.currentTarget.value)}
-							placeholder="namespace / name / environment"
+							placeholder="Filter Services…"
 						/>
 						<fieldset>
 							<legend className="sr-only">Services</legend>
@@ -186,17 +218,22 @@ export function WorkspaceToolbar({
 											checked={selectedKeys.has(key)}
 											onChange={(event) => toggleService(service, event.currentTarget.checked)}
 										/>
-										<span>{formatService(service)}</span>
-										<small>
-											{spanCount} spans · {logCount} logs
-										</small>
+										<span
+											className="service-dot"
+											aria-hidden="true"
+											style={{ backgroundColor: serviceColor(service.name) }}
+										/>
+										<span className="service-name">{formatService(service)}</span>
+										<small>{workspace.signal === "traces" ? spanCount : logCount}</small>
 									</label>
 								);
 							})}
 						</fieldset>
-						<button type="button" className="quiet" onClick={() => onServices([])}>
-							Clear Services
-						</button>
+						{workspace.serviceFilter.length > 0 ? (
+							<button type="button" className="popover-footer-action" onClick={() => onServices([])}>
+								Clear Services
+							</button>
+						) : null}
 					</div>
 				</details>
 
@@ -207,19 +244,14 @@ export function WorkspaceToolbar({
 					onLogQuery={onLogQuery}
 				/>
 
-				<label className="select-control">
-					<span>Range</span>
+				<label className="select-control" aria-label="Time range">
 					<select
 						value={String(activeRangeMinutes)}
 						onChange={(event) => onRange(Number(event.currentTarget.value))}
 					>
 						{rangeOptions.map((minutes) => (
 							<option key={minutes} value={minutes}>
-								{minutes === 60
-									? "Last hour"
-									: minutes % 60 === 0
-										? `Last ${minutes / 60} hours`
-										: `Last ${minutes} minutes`}
+								{rangeLabel(minutes)}
 							</option>
 						))}
 					</select>
@@ -228,8 +260,7 @@ export function WorkspaceToolbar({
 					</span>
 				</label>
 
-				<label className="select-control">
-					<span>Sort</span>
+				<label className="select-control" aria-label="Sort order">
 					<select value={query.sort} onChange={(event) => onSort(event.currentTarget.value)}>
 						<option value="newest">Newest</option>
 						<option value="oldest">Oldest</option>
@@ -240,16 +271,13 @@ export function WorkspaceToolbar({
 					</span>
 				</label>
 
-				<div className="filter-actions">
-					<button type="button" className="quiet" onClick={onClear}>
-						Clear filters
-					</button>
+				<div className="live-controls">
 					<button
 						type="button"
 						className="icon-button"
 						onClick={onRefresh}
 						aria-label="Refresh now"
-						title="Refresh now"
+						title="Refresh now (r)"
 					>
 						<RefreshIcon />
 					</button>
@@ -257,63 +285,113 @@ export function WorkspaceToolbar({
 						type="button"
 						className={workspace.refreshPaused ? "pause active" : "pause"}
 						onClick={onPause}
-						title={workspace.refreshPaused ? "Resume live refresh" : "Pause live refresh"}
+						title={workspace.refreshPaused ? "Resume live refresh (p)" : "Pause live refresh (p)"}
 					>
 						{workspace.refreshPaused ? <PlayIcon /> : <PauseIcon />}
-						{workspace.refreshPaused ? "Resume" : "Pause"}
+						<span>{workspace.refreshPaused ? "Resume" : "Pause"}</span>
 					</button>
+					<div className={`connection connection-${phase}`} role="status" aria-live="polite">
+						<span className="connection-glyph" aria-hidden="true" />
+						<span>{phase === "ready" ? "Live" : phase}</span>
+					</div>
 				</div>
-			</section>
+			</header>
 
-			{workspace.serviceFilter.length > 0 || query.text !== undefined || advancedFilterCount > 0 ? (
-				<fieldset className="active-filters">
-					<legend>Active</legend>
+			{hasActiveFilters ? (
+				<section className="active-filters" aria-label="Active filters">
 					{workspace.serviceFilter.map((service) => (
-						<span className="filter-chip" key={serviceIdentityKey(service)}>
-							Service: {formatService(service)}
-						</span>
+						<FilterChip
+							key={serviceIdentityKey(service)}
+							label={`Service: ${formatService(service)}`}
+							onRemove={() => removeService(service)}
+						/>
 					))}
-					{query.text !== undefined ? <span className="filter-chip">Text: {query.text}</span> : null}
+					{query.text !== undefined ? (
+						<FilterChip label={`Text: ${query.text}`} onRemove={() => onSearch(undefined)} />
+					) : null}
 					{workspace.signal === "traces" && workspace.traceQuery.operation !== undefined ? (
-						<span className="filter-chip">Operation: {workspace.traceQuery.operation}</span>
+						<FilterChip
+							label={`Operation: ${workspace.traceQuery.operation}`}
+							onRemove={() => onTraceQuery({ operation: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "traces" &&
 					workspace.traceQuery.status !== undefined &&
 					workspace.traceQuery.status !== "all" ? (
-						<span className="filter-chip">Status: {workspace.traceQuery.status}</span>
+						<FilterChip
+							label={`Status: ${workspace.traceQuery.status}`}
+							onRemove={() => onTraceQuery({ status: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "traces" && workspace.traceQuery.minimumDurationNs !== undefined ? (
-						<span className="filter-chip">
-							Duration ≥ {formatMilliseconds(workspace.traceQuery.minimumDurationNs)} ms
-						</span>
+						<FilterChip
+							label={`Duration ≥ ${formatMilliseconds(workspace.traceQuery.minimumDurationNs)} ms`}
+							onRemove={() => onTraceQuery({ minimumDurationNs: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "traces" && workspace.traceQuery.maximumDurationNs !== undefined ? (
-						<span className="filter-chip">
-							Duration ≤ {formatMilliseconds(workspace.traceQuery.maximumDurationNs)} ms
-						</span>
+						<FilterChip
+							label={`Duration ≤ ${formatMilliseconds(workspace.traceQuery.maximumDurationNs)} ms`}
+							onRemove={() => onTraceQuery({ maximumDurationNs: undefined })}
+						/>
 					) : null}
 					{query.attributes.map((filter) => (
-						<span className="filter-chip" key={`${filter.key}:${filter.operator}:${filter.value}`}>
-							Attribute: {filter.key} {filter.operator === "equals" ? "=" : "contains"} {filter.value}
-						</span>
+						<FilterChip
+							key={`${filter.key}:${filter.operator}:${filter.value}`}
+							label={`Attribute: ${filter.key} ${filter.operator === "equals" ? "=" : "contains"} ${filter.value}`}
+							onRemove={() => removeAttribute(filter)}
+						/>
 					))}
 					{workspace.signal === "traces" && workspace.traceQuery.traceId !== undefined ? (
-						<span className="filter-chip">Trace: {workspace.traceQuery.traceId}</span>
+						<FilterChip
+							label={`Trace: ${workspace.traceQuery.traceId}`}
+							onRemove={() => onTraceQuery({ traceId: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "logs" && workspace.logQuery.minimumSeverity !== undefined ? (
-						<span className="filter-chip">Severity ≥ {workspace.logQuery.minimumSeverity}</span>
+						<FilterChip
+							label={`Severity ≥ ${workspace.logQuery.minimumSeverity}`}
+							onRemove={() => onLogQuery({ minimumSeverity: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "logs" && workspace.logQuery.maximumSeverity !== undefined ? (
-						<span className="filter-chip">Severity ≤ {workspace.logQuery.maximumSeverity}</span>
+						<FilterChip
+							label={`Severity ≤ ${workspace.logQuery.maximumSeverity}`}
+							onRemove={() => onLogQuery({ maximumSeverity: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "logs" && workspace.logQuery.traceId !== undefined ? (
-						<span className="filter-chip">Trace: {workspace.logQuery.traceId}</span>
+						<FilterChip
+							label={`Trace: ${workspace.logQuery.traceId}`}
+							onRemove={() => onLogQuery({ traceId: undefined })}
+						/>
 					) : null}
 					{workspace.signal === "logs" && workspace.logQuery.spanId !== undefined ? (
-						<span className="filter-chip">Span: {workspace.logQuery.spanId}</span>
+						<FilterChip
+							label={`Span: ${workspace.logQuery.spanId}`}
+							onRemove={() => onLogQuery({ spanId: undefined })}
+						/>
 					) : null}
-				</fieldset>
+					<button type="button" className="clear-all" onClick={onClear}>
+						Clear all
+					</button>
+				</section>
 			) : null}
 		</>
 	);
 }
+
+const FilterChip = ({ label, onRemove }: { readonly label: string; readonly onRemove: () => void }) => (
+	<span className="filter-chip">
+		<span>{label}</span>
+		<button type="button" onClick={onRemove} aria-label={`Remove filter ${label}`}>
+			<CloseIcon size={10} />
+		</button>
+	</span>
+);
+
+const rangeLabel = (minutes: number): string =>
+	minutes === 60 ? "Last hour" : minutes % 60 === 0 ? `Last ${minutes / 60} hours` : `Last ${minutes} min`;
+
+const openPickers = (): ReadonlyArray<HTMLDetailsElement> =>
+	Array.from(document.querySelectorAll<HTMLDetailsElement>("details.picker[open]"));

@@ -87,14 +87,15 @@ export function AdvancedFilters({
 	};
 
 	return (
-		<details className="advanced-picker">
+		<details className="picker advanced-picker">
 			<summary aria-label={`More filters, ${count} active`}>
-				More <span className={count > 0 ? "filter-count engaged" : "filter-count"}>{count}</span>
+				Filters
+				{count > 0 ? <span className="filter-count engaged">{count}</span> : null}
 				<span className="summary-chevron" aria-hidden="true">
 					<ChevronDownIcon />
 				</span>
 			</summary>
-			<form className="advanced-popover" onSubmit={submit}>
+			<form className="popover advanced-popover" onSubmit={submit}>
 				{workspace.signal === "traces" ? (
 					<>
 						<label>

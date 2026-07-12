@@ -13,6 +13,20 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 	await expect(page.getByRole("table", { name: "Trace results" })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Open trace GET /checkout" })).toBeVisible();
 
+	await page.getByRole("textbox", { name: "Search traces" }).fill("no-match");
+	await page.getByRole("button", { name: "Apply trace search" }).click();
+	await expect(page.getByRole("heading", { name: "No traces in this time range" })).toBeVisible();
+	await page.getByRole("textbox", { name: "Search traces" }).fill("checkout");
+	await page.getByRole("button", { name: "Apply trace search" }).click();
+	await expect(page).toHaveURL(/q=checkout/u);
+	await expect(page.getByText("Text: checkout", { exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "Open trace GET /checkout" })).toBeVisible();
+
+	await page.getByRole("button", { name: "Logs" }).click();
+	await expect(page.getByRole("button", { name: "payment declined" })).toBeVisible();
+	await page.getByRole("button", { name: "Traces" }).click();
+	await expect(page.getByRole("button", { name: "Open trace GET /checkout" })).toBeVisible();
+
 	await page.locator('summary[aria-label^="Filter Services"]').click();
 	await page.getByRole("checkbox", { name: /checkout/u }).check();
 	await expect(page).toHaveURL(/service=/u);
@@ -31,7 +45,7 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 	await expect(page.getByText("Duration ≥ 1.5 ms", { exact: true })).toBeVisible();
 	await expect(page.getByText("Attribute: http.route contains /checkout", { exact: true })).toBeVisible();
 
-	await page.locator(".table-row").filter({ hasText: "GET /checkout" }).locator("td.truncate").click();
+	await page.locator(".table-row").filter({ hasText: "GET /checkout" }).click();
 	await expect(page).toHaveURL(new RegExp(`/traces/${traceId}`, "u"));
 	await expect(page.getByRole("heading", { name: "Span waterfall" })).toBeVisible();
 	await expect(page.getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/openapi.json");
@@ -69,10 +83,42 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 	await expect(page.getByText("request.user_agent", { exact: true })).toBeVisible();
 	await expect(page.getByText("Dropped log attributes", { exact: true })).toBeVisible();
 
+	let releaseCorrelatedLogs = () => {};
+	const correlatedLogsPending = new Promise<void>((resolve) => {
+		releaseCorrelatedLogs = resolve;
+	});
+	await page.unroute("**/api/**");
+	await page.route("**/api/**", async (route) => {
+		if (new URL(route.request().url()).pathname === `/api/traces/${traceId}/logs`) await correlatedLogsPending;
+		await respond(route);
+	});
 	await page.getByRole("button", { name: "Open correlated trace logs" }).click();
 	await expect(page).toHaveURL(/\/logs\?/u);
 	await expect(page).toHaveURL(new RegExp(`filterTrace=${traceId}`, "u"));
 	await expect(page).not.toHaveURL(/service=/u);
+	await expect(page.getByRole("status").filter({ hasText: "Loading telemetry…" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "No logs in this time range" })).toHaveCount(0);
+	releaseCorrelatedLogs();
+	await page.getByRole("button", { name: "payment declined" }).click();
+	await expect(page.getByRole("heading", { name: /payment declined/u })).toBeVisible();
+	await page.getByRole("button", { name: "Open complete trace and focus span" }).click();
+	await expect(page).toHaveURL(new RegExp(`/traces/${traceId}.*span=${spanId}`, "u"));
+
+	let releaseSpanLogs = () => {};
+	const spanLogsPending = new Promise<void>((resolve) => {
+		releaseSpanLogs = resolve;
+	});
+	await page.unroute("**/api/**");
+	await page.route("**/api/**", async (route) => {
+		const url = new URL(route.request().url());
+		if (url.pathname === `/api/traces/${traceId}/logs` && url.searchParams.has("spanId")) await spanLogsPending;
+		await respond(route);
+	});
+	await page.getByRole("button", { name: "Open correlated logs for selected span" }).click();
+	await expect(page).toHaveURL(new RegExp(`filterSpan=${spanId}`, "u"));
+	await expect(page.getByRole("status").filter({ hasText: "Loading telemetry…" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "No logs in this time range" })).toHaveCount(0);
+	releaseSpanLogs();
 	await page.getByRole("button", { name: "payment declined" }).click();
 	await expect(page.getByRole("heading", { name: /payment declined/u })).toBeVisible();
 
@@ -108,7 +154,7 @@ test("virtualizes large log results while keeping accessible row controls", asyn
 	expect(await renderedRows.count()).toBeLessThan(50);
 	await expect(page.getByRole("button", { name: "payment declined" })).toBeVisible();
 	const paymentRow = renderedRows.filter({ hasText: "payment declined" });
-	await paymentRow.locator("td.truncate").click();
+	await paymentRow.click();
 	await expect(page.getByRole("heading", { name: /payment declined/u })).toBeVisible();
 });
 
@@ -120,7 +166,10 @@ const respond = async (route: Route): Promise<void> => {
 	const request = route.request();
 	const path = new URL(request.url()).pathname;
 	if (path === "/api/services") return json(route, servicePage);
-	if (path === "/api/traces/search") return json(route, tracePage);
+	if (path === "/api/traces/search") {
+		const payload = request.postDataJSON() as { readonly text?: string };
+		return json(route, payload.text === "no-match" ? { ...tracePage, items: [] } : tracePage);
+	}
 	if (path === `/api/traces/${traceId}`) return json(route, traceDetail);
 	if (path === `/api/traces/${traceId}/logs`) {
 		const cursor = new URL(request.url()).searchParams.get("cursor");
