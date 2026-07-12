@@ -1,11 +1,11 @@
 ---
 name: source-context
-description: Use when working with Effect, @effect/platform-node, ai, or @ai-sdk/devtools code. Resolve version-matched dependency source with opensrc before relying on memory, docs summaries, or generated examples.
+description: Use when working with Effect or @effect/platform-node code. Resolve version-matched dependency source with opensrc before relying on memory, docs summaries, or generated examples.
 ---
 
 ## Purpose
 
-Use version-matched dependency source as the authority for Effect v4 beta and AI SDK behavior.
+Use version-matched dependency source as the authority for Effect v4 beta behavior.
 
 Training data and public examples may be stale. Before changing, debugging, or explaining code that depends on these packages, inspect the installed-version source, tests, and bundled docs where available.
 
@@ -32,8 +32,6 @@ Prompt the subagent with the full target and question, including any version or 
 
 - `effect`
 - `@effect/platform-node`
-- `ai`
-- `@ai-sdk/devtools`
 
 ## Required Workflow
 
@@ -43,7 +41,7 @@ Prompt the subagent with the full target and question, including any version or 
 2. Resolve source paths with `opensrc` from that package directory:
 
    ```sh
-   opensrc path --cwd <workspace-package-dir> effect @effect/platform-node ai @ai-sdk/devtools
+   opensrc path --cwd <workspace-package-dir> effect @effect/platform-node
    ```
 
    Do not hardcode versions or cache paths in this skill.
@@ -65,7 +63,7 @@ Prompt the subagent with the full target and question, including any version or 
 Resolve all covered packages for code owned by `apps/cli`:
 
 ```sh
-opensrc path --cwd apps/cli effect @effect/platform-node ai @ai-sdk/devtools
+opensrc path --cwd apps/cli effect @effect/platform-node
 ```
 
 NOTE: Make sure you use the correct path to the package.json containing the dependency or package you are interested in.
@@ -81,7 +79,6 @@ Fetch a specific version only when package-local lockfile resolution is unavaila
 
 ```sh
 opensrc path effect@4.0.0-beta.67
-opensrc path ai@6.0.184
 ```
 
 ## Important Notes
@@ -89,7 +86,6 @@ opensrc path ai@6.0.184
 - Do not run `opensrc path --cwd` from the repo root unless the root package declares the dependency. In a monorepo, the root may resolve the wrong version.
 - If `opensrc` fetches on cache miss and network access is blocked, request approval rather than guessing.
 - If source and local package types disagree with public docs, trust the installed-version source/types.
-- For AI SDK feature work, also use the `ai-sdk` skill. This skill provides source verification; the `ai-sdk` skill provides API-specific workflow guidance.
 
 ## When to Use
 
@@ -98,7 +94,7 @@ Use it when you need to:
 - Modify code importing these packages
 - Debug runtime or type behavior involving these packages
 - Understand behavior that docs or types do not explain
-- Understand APIs, layers, services, runtime behavior, streams, tools, agents, or devtools
+- Understand APIs, layers, services, runtime behavior, streams, tools, or devtools
 - Verify edge cases or beta-version behavior
 - Recommend patterns based on real implementations
 
