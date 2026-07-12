@@ -2,6 +2,8 @@ import type { LogSummary, TraceSummary } from "@belfry/telemetry";
 import { formatNanoseconds, formatService, formatSeverity, formatTimestamp } from "@belfry/workspace";
 import { useRef } from "react";
 
+import { PulseIcon } from "./icons.js";
+import { serviceColor } from "./palette.js";
 import { useVirtualWindow } from "./virtual-list.js";
 
 const traceRowHeight = 46;
@@ -50,6 +52,13 @@ export function TraceList({
 										</time>
 									</td>
 									<td className="truncate" title={trace.services.map(formatService).join(", ")}>
+										<span
+											className="service-dot"
+											aria-hidden="true"
+											style={{
+												backgroundColor: serviceColor(trace.services[0]?.name ?? ""),
+											}}
+										/>
 										{trace.services.map((service) => service.name).join(" + ")}
 									</td>
 									<td className="primary-cell">
@@ -127,6 +136,11 @@ export function LogList({
 										</time>
 									</td>
 									<td className="truncate" title={formatService(log.service)}>
+										<span
+											className="service-dot"
+											aria-hidden="true"
+											style={{ backgroundColor: serviceColor(log.service.name) }}
+										/>
 										{log.service.name}
 									</td>
 									<td>
@@ -191,15 +205,15 @@ export function EmptyResults({
 	return (
 		<div className="empty-state">
 			<span className="empty-icon" aria-hidden="true">
-				⌁
+				<PulseIcon size={24} />
 			</span>
-			<h2>No matching {signal}</h2>
+			<h2>No {signal} in this time range</h2>
 			<p>
 				Send OTLP/HTTP to{" "}
 				<code>
 					{endpoint}/v1/{signal}
-				</code>
-				, or clear the active filters and widen the time range.
+				</code>{" "}
+				or widen the time range.
 			</p>
 			<div>
 				<button type="button" onClick={onClear}>

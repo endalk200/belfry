@@ -19,6 +19,8 @@ import {
 } from "@belfry/workspace";
 import { useMemo, useRef, useState } from "react";
 
+import { ArrowLeftIcon, CloseIcon, CopyIcon, LogsIcon } from "./icons.js";
+import { serviceColor } from "./palette.js";
 import { useVirtualWindow } from "./virtual-list.js";
 
 export function TraceDetailView({
@@ -44,13 +46,19 @@ export function TraceDetailView({
 			<div className="detail-heading">
 				<div>
 					<button type="button" className="back-button" onClick={onClose}>
-						← Trace list
+						<ArrowLeftIcon />
+						All traces
 					</button>
 					<p className="eyebrow">TRACE DETAIL</p>
 					<h1 id="trace-title">{trace.rootOperation || "Unnamed operation"}</h1>
-					<button type="button" className="copy-id" onClick={() => void copyText(trace.traceId, onNotice)}>
+					<button
+						type="button"
+						className="copy-id"
+						onClick={() => void copyText(trace.traceId, onNotice)}
+						title="Copy trace ID"
+					>
 						<code>{trace.traceId}</code>
-						<span>Copy</span>
+						<CopyIcon />
 					</button>
 				</div>
 				<div className="trace-summary">
@@ -75,10 +83,12 @@ export function TraceDetailView({
 
 			<div className="correlation-actions">
 				<button type="button" onClick={() => onAction({ type: "trace-logs-opened" })}>
+					<LogsIcon />
 					Open correlated trace logs
 				</button>
 				{selectedSpan !== undefined ? (
 					<button type="button" onClick={() => onAction({ type: "span-logs-opened" })}>
+						<LogsIcon />
 						Open correlated logs for selected span
 					</button>
 				) : null}
@@ -86,10 +96,7 @@ export function TraceDetailView({
 
 			{selectedSpan === undefined ? (
 				<div className="detail-placeholder">
-					<p>
-						Select a waterfall row to inspect the span's complete attributes, events, links, resource,
-						scope, and correlated logs.
-					</p>
+					<p>Select a span in the waterfall to inspect its attributes, events, links, and logs.</p>
 				</div>
 			) : (
 				<SpanDetailPanel
@@ -111,7 +118,7 @@ export function TraceDetailView({
 					<span>{trace.logs.length} records</span>
 				</div>
 				{trace.logs.length === 0 ? (
-					<p className="muted">No logs carry this trace identity.</p>
+					<p className="muted">No logs reference this trace.</p>
 				) : (
 					<CorrelatedLogList logs={trace.logs} onOpenLog={onOpenLog} label="Trace-correlated logs" />
 				)}
@@ -165,80 +172,131 @@ function Waterfall({
 					<output>{zoom.toFixed(2)}×</output>
 				</label>
 			</div>
-			<div className="waterfall-header">
-				<span>Span / Service</span>
-				<span>Relative timeline</span>
-				<span>Duration</span>
-				<span>Logs</span>
-			</div>
 			<div className="waterfall-scroll" ref={container}>
-				<div style={{ height: virtual.totalHeight, minWidth: `${Math.round(900 * zoom)}px` }}>
-					<div style={{ transform: `translateY(${virtual.offset}px)` }}>
-						{rows.slice(virtual.start, virtual.end).map((row) => {
-							const selected = row.span.spanId === workspace.selectedSpanId;
-							const startPercent = ratio(row.span.startTimeNs - traceStart, traceDuration) * 100;
-							const duration =
-								row.span.endTimeNs === undefined ? 0n : row.span.endTimeNs - row.span.startTimeNs;
-							const widthPercent = Math.max(0.35, ratio(duration, traceDuration) * 100);
-							return (
-								<div className={`waterfall-row${selected ? " selected" : ""}`} key={row.span.spanId}>
+				<div style={{ minWidth: `${Math.round(900 * zoom)}px` }}>
+					<div className="waterfall-header">
+						<span>Span / Service</span>
+						<span className="time-ruler" aria-hidden="true">
+							{[0, 1, 2, 3, 4].map((tick) => (
+								<span key={tick}>{formatNanoseconds((traceDuration * BigInt(tick)) / 4n)}</span>
+							))}
+						</span>
+						<span className="numeric">Duration</span>
+						<span className="numeric">Logs</span>
+					</div>
+					<div style={{ height: virtual.totalHeight }}>
+						<div style={{ transform: `translateY(${virtual.offset}px)` }}>
+							{rows.slice(virtual.start, virtual.end).map((row) => {
+								const selected = row.span.spanId === workspace.selectedSpanId;
+								const startPercent = ratio(row.span.startTimeNs - traceStart, traceDuration) * 100;
+								const duration =
+									row.span.endTimeNs === undefined ? 0n : row.span.endTimeNs - row.span.startTimeNs;
+								const widthPercent = Math.max(0.35, ratio(duration, traceDuration) * 100);
+								const clampedWidth = Math.min(100 - startPercent, widthPercent);
+								const status = spanStatus(row.span);
+								const barColor =
+									status === "Error"
+										? undefined
+										: status === "Running"
+											? undefined
+											: serviceColor(row.span.service.name);
+								const labelAfter = startPercent + clampedWidth <= 76;
+								const durationLabel = formatNanoseconds(
+									row.span.endTimeNs === undefined ? undefined : duration,
+								);
+								return (
 									<div
-										className="span-name"
-										style={{ paddingInlineStart: `${12 + row.depth * 18}px` }}
+										className={`waterfall-row${selected ? " selected" : ""}`}
+										key={row.span.spanId}
 									>
-										{row.hasChildren ? (
+										<div
+											className="span-name"
+											style={{ paddingInlineStart: `${12 + row.depth * 18}px` }}
+										>
+											{row.hasChildren ? (
+												<button
+													type="button"
+													className="collapse"
+													onClick={() =>
+														onAction({
+															type: "span-collapse-toggled",
+															spanId: row.span.spanId,
+														})
+													}
+													aria-label={`${row.collapsed ? "Expand" : "Collapse"} ${row.span.name}`}
+												>
+													{row.collapsed ? "▸" : "▾"}
+												</button>
+											) : (
+												<span className="leaf" aria-hidden="true">
+													·
+												</span>
+											)}
 											<button
 												type="button"
-												className="collapse"
+												className="span-select"
+												aria-label={`Inspect span ${row.span.name}`}
 												onClick={() =>
-													onAction({ type: "span-collapse-toggled", spanId: row.span.spanId })
+													onAction({
+														type: "span-selected",
+														traceId: trace.traceId,
+														spanId: row.span.spanId,
+													})
 												}
-												aria-label={`${row.collapsed ? "Expand" : "Collapse"} ${row.span.name}`}
 											>
-												{row.collapsed ? "▸" : "▾"}
+												<strong>
+													{row.span.name}
+													{row.collapsed && row.hiddenDescendantCount > 0 ? (
+														<span className="hidden-count">
+															+{row.hiddenDescendantCount}
+														</span>
+													) : null}
+												</strong>
+												<small>
+													<span
+														className="service-dot"
+														aria-hidden="true"
+														style={{
+															backgroundColor: serviceColor(row.span.service.name),
+														}}
+													/>
+													{formatService(row.span.service)} · {status}
+												</small>
 											</button>
-										) : (
-											<span className="leaf" aria-hidden="true">
-												·
-											</span>
-										)}
-										<button
-											type="button"
-											className="span-select"
-											aria-label={`Inspect span ${row.span.name}`}
-											onClick={() =>
-												onAction({
-													type: "span-selected",
-													traceId: trace.traceId,
-													spanId: row.span.spanId,
-												})
-											}
+										</div>
+										<div
+											className="timeline"
+											title={`starts +${formatNanoseconds(row.span.startTimeNs - traceStart)} · runs ${durationLabel}`}
 										>
-											<strong>{row.span.name}</strong>
-											<small>
-												{formatService(row.span.service)} · {spanStatus(row.span)}
-											</small>
-										</button>
+											<span
+												className={`timeline-bar status-${status.toLocaleLowerCase()}`}
+												style={{
+													insetInlineStart: `${startPercent}%`,
+													width: `${clampedWidth}%`,
+													...(barColor === undefined ? {} : { backgroundColor: barColor }),
+												}}
+											/>
+											<span
+												className={`bar-label${labelAfter ? "" : " before"}`}
+												style={
+													labelAfter
+														? {
+																insetInlineStart: `calc(${Math.min(100, startPercent + clampedWidth)}% + 6px)`,
+															}
+														: {
+																insetInlineEnd: `calc(${Math.max(0, 100 - startPercent)}% + 6px)`,
+															}
+												}
+											>
+												{durationLabel}
+											</span>
+										</div>
+										<span className="numeric">{durationLabel}</span>
+										<span className="numeric">{row.span.logCount}</span>
 									</div>
-									<div className="timeline">
-										<span
-											className={`timeline-bar status-${spanStatus(row.span).toLocaleLowerCase()}`}
-											style={{
-												insetInlineStart: `${startPercent}%`,
-												width: `${Math.min(100 - startPercent, widthPercent)}%`,
-											}}
-										/>
-										<span className="relative-time">
-											+{formatNanoseconds(row.span.startTimeNs - traceStart)}
-										</span>
-									</div>
-									<span className="numeric">
-										{formatNanoseconds(row.span.endTimeNs === undefined ? undefined : duration)}
-									</span>
-									<span className="numeric">{row.span.logCount}</span>
-								</div>
-							);
-						})}
+								);
+							})}
+						</div>
 					</div>
 				</div>
 			</div>
@@ -273,9 +331,14 @@ function SpanDetailPanel({
 					<p className="eyebrow">SELECTED SPAN</p>
 					<h2 id="span-detail-title">{span.name}</h2>
 				</div>
-				<button type="button" className="copy-id" onClick={() => void copyText(span.spanId, onNotice)}>
+				<button
+					type="button"
+					className="copy-id"
+					onClick={() => void copyText(span.spanId, onNotice)}
+					title="Copy span ID"
+				>
 					<code>{span.spanId}</code>
-					<span>Copy</span>
+					<CopyIcon />
 				</button>
 			</div>
 			<nav className="detail-tabs" aria-label="Span detail sections">
@@ -365,6 +428,7 @@ function SpanOverview({
 			</div>
 			<div className="inline-actions">
 				<button type="button" onClick={() => onAction({ type: "span-logs-opened" })}>
+					<LogsIcon />
 					Open correlated span logs
 				</button>
 			</div>
@@ -429,12 +493,18 @@ export function LogDetailView({
 					</h2>
 				</div>
 				<div className="heading-actions">
-					<button type="button" className="copy-id" onClick={() => void copyText(log.id, onNotice)}>
+					<button
+						type="button"
+						className="copy-id"
+						onClick={() => void copyText(log.id, onNotice)}
+						title="Copy log ID"
+					>
 						<code>{log.id}</code>
-						<span>Copy</span>
+						<CopyIcon />
 					</button>
 					<button type="button" className="quiet" onClick={onClose}>
-						Close detail
+						<CloseIcon />
+						Close
 					</button>
 				</div>
 			</div>

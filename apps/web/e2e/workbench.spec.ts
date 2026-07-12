@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 
 test("filters, searches, correlates, restores URLs, and exposes complete detail", async ({ page }) => {
 	await page.goto("/traces");
-	await expect(page.getByRole("heading", { name: "Trace search" })).toBeVisible();
+	await expect(page.getByRole("table", { name: "Trace results" })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Open trace GET /checkout" })).toBeVisible();
 
 	await page.locator('summary[aria-label^="Filter Services"]').click();
@@ -95,7 +95,7 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 
 test("virtualizes large log results while keeping accessible row controls", async ({ page }) => {
 	await page.goto("/logs");
-	await expect(page.getByRole("heading", { name: "Log search" })).toBeVisible();
+	await expect(page.getByRole("table", { name: "Log results" })).toBeVisible();
 	await page.locator('summary[aria-label^="More filters"]').click();
 	await page.getByLabel("Minimum severity").selectOption("17");
 	await page.getByLabel("Span ID").fill(spanId);

@@ -3,6 +3,8 @@ import { canonicalSpanId, canonicalTraceId } from "@belfry/telemetry";
 import type { WorkspaceState } from "@belfry/workspace";
 import { type FormEvent, useEffect, useState } from "react";
 
+import { ChevronDownIcon } from "./icons.js";
+
 export function AdvancedFilters({
 	workspace,
 	count,
@@ -87,7 +89,10 @@ export function AdvancedFilters({
 	return (
 		<details className="advanced-picker">
 			<summary aria-label={`More filters, ${count} active`}>
-				More <span className="filter-count">{count}</span>
+				More <span className={count > 0 ? "filter-count engaged" : "filter-count"}>{count}</span>
+				<span className="summary-chevron" aria-hidden="true">
+					<ChevronDownIcon />
+				</span>
 			</summary>
 			<form className="advanced-popover" onSubmit={submit}>
 				{workspace.signal === "traces" ? (
