@@ -208,25 +208,37 @@ const normalizeLog = (
 	resource: ResourceDetail,
 	scope: ScopeDetail,
 	service: ServiceIdentity,
-): NormalizedLog => ({
-	timestampNs: optionalNanoseconds(log.timeUnixNano),
-	observedTimeNs: optionalNanoseconds(log.observedTimeUnixNano),
-	service,
-	severityNumber:
-		log.severityNumber === undefined || log.severityNumber === null || log.severityNumber === 0
-			? undefined
-			: log.severityNumber,
-	severityText: nonEmpty(log.severityText),
-	traceId: optionalCanonicalId(log.traceId, 16, "logs", "invalid_trace_id"),
-	spanId: optionalCanonicalId(log.spanId, 8, "logs", "invalid_span_id"),
-	traceFlags: log.flags ?? 0,
-	body: normalizeAnyValue(log.body),
-	attributes: normalizeAttributes(log.attributes),
-	droppedAttributesCount: positive(log.droppedAttributesCount),
-	eventName: nonEmpty(log.eventName),
-	resource,
-	scope,
-});
+): NormalizedLog => {
+	const attributes = normalizeAttributes(log.attributes);
+	// Some SDK log bridges (e.g. Effect's logger) carry span context as log
+	// attributes instead of the OTLP record fields. Honor them as a fallback so
+	// trace–log correlation still works.
+	const traceId =
+		optionalCanonicalId(log.traceId, 16, "logs", "invalid_trace_id") ??
+		attributeCorrelationId(attributes, ["traceId", "trace_id"], 32);
+	const spanId =
+		optionalCanonicalId(log.spanId, 8, "logs", "invalid_span_id") ??
+		(traceId === undefined ? undefined : attributeCorrelationId(attributes, ["spanId", "span_id"], 16));
+	return {
+		timestampNs: optionalNanoseconds(log.timeUnixNano),
+		observedTimeNs: optionalNanoseconds(log.observedTimeUnixNano),
+		service,
+		severityNumber:
+			log.severityNumber === undefined || log.severityNumber === null || log.severityNumber === 0
+				? undefined
+				: log.severityNumber,
+		severityText: nonEmpty(log.severityText),
+		traceId,
+		spanId,
+		traceFlags: log.flags ?? 0,
+		body: normalizeAnyValue(log.body),
+		attributes,
+		droppedAttributesCount: positive(log.droppedAttributesCount),
+		eventName: nonEmpty(log.eventName),
+		resource,
+		scope,
+	};
+};
 
 const normalizeResource = (resource: ProtoResource | null | undefined): ResourceDetail => ({
 	attributes: normalizeAttributes(resource?.attributes),
@@ -296,6 +308,20 @@ const serviceFromResource = (
 
 const stringAttribute = (value: OtlpAnyValue | undefined): string | undefined =>
 	value?.type === "string" && value.value !== "" ? value.value : undefined;
+
+/** Read a canonical hex identity from conventional correlation attributes, ignoring invalid values. */
+const attributeCorrelationId = (
+	attributes: TelemetryAttributes,
+	keys: ReadonlyArray<string>,
+	length: number,
+): string | undefined => {
+	for (const key of keys) {
+		const value = stringAttribute(attributes[key])?.toLowerCase();
+		if (value !== undefined && value.length === length && /^[0-9a-f]+$/u.test(value) && !/^0+$/u.test(value))
+			return value;
+	}
+	return undefined;
+};
 
 const canonicalId = (
 	value: Uint8Array | null | undefined,
