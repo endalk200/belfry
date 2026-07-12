@@ -1,24 +1,12 @@
 # Runtime, Package Manager, and Test Runner
 
-Status: Accepted
+Status: Superseded by [0006 Bun Runtime for OpenTUI](./0006-bun-runtime-for-opentui.md)
 
-Belfry targets Node.js for production runtime behavior. The minimum supported
-Node.js version is `>=22.12.0`, as declared by the root package and the public
-CLI package.
+This ADR originally selected a different production runtime. ADR 0006 replaces
+that decision in full: Belfry now uses Bun for package management, repository
+scripts, the published CLI runtime, OpenTUI, workers, SQLite, and bundling.
 
-Bun is the only supported package manager for this repository. It installs
-dependencies, runs workspace scripts, and may execute TypeScript entry points
-during local development. Production releases still build a bundled JavaScript
-CLI for Node.js.
-
-Tests run with Vitest. Packages that use Effect test helpers import them from
-`@effect/vitest`, which is versioned with the installed Effect packages. We use
-Vitest instead of `bun test` so those helpers and Effect's own testing patterns
-remain available while Bun continues to handle dependency and script execution.
-
-Consequences:
-
-- CI and release checks must preserve Node.js compatibility.
-- Local and CI commands should use `bun run ...` for repository scripts.
-- Tests should be written for Vitest and may use `@effect/vitest` helpers where
-  Effect code is under test.
+The retained part of this decision is the test runner. Packages use Vitest and
+may use version-matched `@effect/vitest` helpers; Playwright covers browser
+workflows. Current runtime consequences are documented only in ADR 0006 so this
+superseded record does not create a conflicting compatibility promise.
