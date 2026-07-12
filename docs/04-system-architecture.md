@@ -2,9 +2,8 @@
 
 ## Runtime topology
 
-One verified Daemon owns the machine-wide Telemetry Store. Terminal and browser
-interfaces are disposable clients; quitting either leaves ingestion and
-retention running.
+One verified Daemon owns the machine-wide Telemetry Store. Browser and Query API
+clients are disposable; closing them leaves ingestion and retention running.
 
 ```text
 OpenTelemetry SDKs
@@ -20,7 +19,7 @@ loopback Bun Daemon (default 127.0.0.1:4318)
 SQLite Telemetry Store (WAL)
   ^
   |
-TUI / Web / scripts / coding agents
+Web / scripts / coding agents
 ```
 
 The request-facing Daemon does not perform SQLite writes or heavy OTLP decode on
@@ -41,14 +40,14 @@ queries responsive while writes are in progress.
 | `@belfry/query-api` | Effect HttpApi schemas, errors, cursors, typed client |
 | `@belfry/workspace` | Renderer-independent state transitions, shared typed client adapter, URL state, waterfall |
 | `@belfry/daemon` | Listener, routes, query handlers, graceful lifecycle |
-| `@belfry/tui` | OpenTUI renderer and command registry |
 | `@belfry/web` | React/Vite renderer and virtualized waterfall |
 | `@belfry/cli` | Public command surface and Daemon/database orchestration |
 
 ## Lifecycle ownership
 
 `belfry`, `belfry web`, and `belfry daemon start` all call the same Daemon
-manager. It uses an exclusive lock plus a registry containing PID, process start
+manager. The first two open or print the Daemon-served browser Workspace. The
+manager uses an exclusive lock plus a registry containing PID, process start
 identity, endpoint, and ownership token. Adoption verifies identity and health;
 stop signals only the verified process. Stale registries are recovered without
 killing unrelated reused PIDs.

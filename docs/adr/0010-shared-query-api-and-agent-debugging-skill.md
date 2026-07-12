@@ -1,6 +1,6 @@
 # Shared Query API and Agent Debugging Skill
 
-Status: Accepted
+Status: Amended by [0011 Web Workspace as the Shipped Interactive Interface](./0011-web-workspace-as-shipped-interface.md)
 
 Belfry exposes one bounded, typed Query API for its terminal interface, web
 interface, scripts, and coding agents, with generated OpenAPI documentation.

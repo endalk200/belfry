@@ -3,7 +3,7 @@
 ## Runtime baseline
 
 Belfry uses Bun for dependency management, development scripts, the published
-CLI runtime, OpenTUI, SQLite, workers, and bundling. The Effect family is pinned
+CLI runtime, SQLite, workers, and bundling. The Effect family is pinned
 atomically to `4.0.0-beta.97`, including platform, SQL, and test integrations.
 Beta API usage was implemented against version-matched dependency source.
 
@@ -35,9 +35,8 @@ handler never receives the broad Store implementation.
 
 The Store service is implemented through focused modules for forward-only
 migrations, batched writer projections, canonical record encoding, trace
-structure, facets, bounded retention, and low-level parameterized SQL. The TUI
-separates interaction/recovery state from renderer panes, while both renderers
-consume the same Workspace data-source contract.
+structure, facets, bounded retention, and low-level parameterized SQL. The web
+renderer consumes the shared Workspace state and data-source interfaces.
 
 ## Pure domain seams
 

@@ -2,8 +2,7 @@
 
 Belfry is a lightweight, local OpenTelemetry workbench for traces and logs. One
 loopback-only Bun Daemon receives OTLP/HTTP, persists complete records in
-SQLite, and serves both a keyboard-first terminal Workspace and an
-URL-addressable browser Workspace.
+SQLite, and serves a URL-addressable browser Workspace.
 
 ## Install and run
 
@@ -12,8 +11,9 @@ bun add --global @belfry/cli
 belfry
 ```
 
-`belfry` starts or adopts the machine-wide Daemon and opens the TUI. Closing the
-TUI does not stop ingestion. Use `belfry web` for the browser Workspace.
+`belfry` starts or adopts the machine-wide Daemon and opens the browser
+Workspace. Closing the browser does not stop ingestion. Use `belfry web
+--no-open` to start the Workspace and print its URL without launching a browser.
 
 ```sh
 belfry daemon status --json

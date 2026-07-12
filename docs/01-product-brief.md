@@ -20,9 +20,9 @@ processes. They need to answer, quickly:
 
 ## Product shape
 
-Running `belfry` starts or adopts one machine-wide Daemon and opens a terminal
-Workspace. `belfry web` opens the same state model in a browser. Both use the
-same Query API and the same SQLite Telemetry Store.
+Running `belfry` starts or adopts one machine-wide Daemon and opens the browser
+Workspace. The browser, scripts, and coding agents use the same Query API and
+the same SQLite Telemetry Store.
 
 Services use standard OTLP configuration:
 
@@ -51,7 +51,7 @@ team dashboard. This release intentionally supports traces and logs only.
 ## Acceptance statement
 
 The shipped public CLI has been exercised with real OpenTelemetry SDK exports,
-real daemon persistence and restart, real terminal input, and a real browser.
-Automated suites cover protocol errors, storage projections and retention,
-lifecycle ownership, shared Workspace behavior, adaptive UI workflows,
-packaging, and the performance thresholds in the PRD.
+real Daemon persistence and restart, and a real browser. Automated suites cover
+protocol errors, storage projections and retention, lifecycle ownership,
+Workspace behavior, responsive browser workflows, packaging, and the
+performance thresholds in the PRD.

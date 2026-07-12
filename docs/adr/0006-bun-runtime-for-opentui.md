@@ -1,6 +1,6 @@
 # Bun Runtime for OpenTUI
 
-Status: Accepted
+Status: Superseded by [0011 Web Workspace as the Shipped Interactive Interface](./0011-web-workspace-as-shipped-interface.md)
 
 Belfry uses Bun as its package manager and production runtime, superseding the
 earlier Node.js production-runtime decision. A single Bun runtime lets Belfry

@@ -1,6 +1,6 @@
 # Query API
 
-The Daemon exposes one read-only, bounded API for the TUI, browser, scripts, and
+The Daemon exposes one read-only, bounded API for the browser, scripts, and
 coding agents. Effect HttpApi and Effect Schema define validation, response
 encoding, tagged errors, the typed client, and generated OpenAPI.
 
