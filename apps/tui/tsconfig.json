@@ -1,0 +1,12 @@
+{
+	"extends": "@belfry/typescript-config/base.json",
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "@opentui/react",
+		"outDir": "dist",
+		"rootDir": "src",
+		"types": ["bun", "react"]
+	},
+	"include": ["src/**/*.ts", "src/**/*.tsx"],
+	"exclude": ["dist", "node_modules"]
+}

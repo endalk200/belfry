@@ -1,21 +1,25 @@
 import { createRequire } from "node:module";
 import {
+	BelfryConfig,
 	CONFIG_PATH_ENV,
 	type ConfigValidationReport,
+	defaultBelfryConfiguration,
 	InvalidConfigPath,
 	OTLP_ENDPOINT_ENV,
 	parseTelemetryEnabledEnv,
 	parseTelemetryEndpointEnv,
 	TELEMETRY_ENV,
 } from "@belfry/config";
+import { DaemonManager } from "@belfry/daemon/lifecycle";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Logger, Path, Stdio, Terminal } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliOutput } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { configValidationHasFailures, formatConfigValidationReport } from "./cli/commands/config/validate.cmd.js";
+import { shouldOpenWebWorkspace } from "./cli/commands/web.cmd.js";
 import { runCliWithArgs } from "./cli/run.js";
-import { handleCliFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
+import { handleCliFailure, reportTuiFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
 import {
 	DEFAULT_OTLP_HTTP_ENDPOINT,
 	telemetryLayerFromConfiguration,
@@ -41,6 +45,15 @@ const SpawnerLayer = Layer.succeed(
 	ChildProcessSpawner.make(() => Effect.die("Child process spawning is not implemented in CLI tests")),
 );
 
+const DaemonManagerTestLayer = Layer.succeed(DaemonManager, {
+	status: Effect.succeed({ state: "stopped" as const, message: "test Daemon is stopped" }),
+	withStoppedDaemonLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
+	start: Effect.die("Daemon start is not implemented in CLI unit tests"),
+	stop: Effect.die("Daemon stop is not implemented in CLI unit tests"),
+	restart: Effect.die("Daemon restart is not implemented in CLI unit tests"),
+	serve: Effect.never,
+});
+
 const cliTestLayer = (files: Record<string, string> = {}) =>
 	Layer.mergeAll(
 		TestConsole.layer,
@@ -57,6 +70,8 @@ const cliTestLayer = (files: Record<string, string> = {}) =>
 		TerminalLayer,
 		CliOutput.layer(CliOutput.defaultFormatter({ colors: false })),
 		SpawnerLayer,
+		DaemonManagerTestLayer,
+		Layer.succeed(BelfryConfig, defaultBelfryConfiguration),
 		Stdio.layerTest({}),
 		withoutConsoleLogger,
 	);
@@ -98,14 +113,15 @@ const runBelfryCommand = (args: ReadonlyArray<string>, files: Record<string, str
 	}).pipe(withIsolatedBelfryEnvironment, Effect.provide(cliTestLayer(files)));
 
 describe("belfry CLI", () => {
-	it.effect("prints root help and succeeds when invoked without arguments", () =>
+	it.effect("prints root help when explicitly requested", () =>
 		Effect.gen(function* () {
-			const { stdout } = yield* runBelfryCommand([]);
+			const { stdout } = yield* runBelfryCommand(["--help"]);
 			const stdoutText = stdout.join("\n");
 
 			assert.include(stdoutText, "belfry <subcommand> [flags]");
 			assert.include(stdoutText, "Manage Belfry configuration");
 			assert.include(stdoutText, "config");
+			assert.include(stdoutText, "database");
 			assert.include(stdoutText, "version");
 		}),
 	);
@@ -124,6 +140,15 @@ describe("belfry CLI", () => {
 			const normalizedPath = String(stdout[0] ?? "").replaceAll("\\", "/");
 
 			assert.strictEqual(normalizedPath.endsWith("/.belfry/config.toml"), true);
+		}),
+	);
+
+	it.effect("prints the machine-wide Telemetry Store path", () =>
+		Effect.gen(function* () {
+			const { stdout } = yield* runBelfryCommand(["database", "path"]);
+			const normalizedPath = String(stdout[0] ?? "").replaceAll("\\", "/");
+
+			assert.strictEqual(normalizedPath, defaultBelfryConfiguration.storage.databasePath.replaceAll("\\", "/"));
 		}),
 	);
 
@@ -188,7 +213,7 @@ describe("belfry CLI", () => {
 	it.effect("disables telemetry with a warning when the configured collector is unavailable", () =>
 		Effect.gen(function* () {
 			const previousFetch = globalThis.fetch;
-			globalThis.fetch = (() => Promise.reject(new Error("collector unavailable"))) as typeof fetch;
+			globalThis.fetch = (() => Promise.reject(new Error("collector unavailable"))) as unknown as typeof fetch;
 
 			yield* Effect.gen(function* () {
 				const loggers = yield* Logger.CurrentLoggers;
@@ -219,7 +244,7 @@ describe("belfry CLI", () => {
 	it.effect("keeps telemetry enabled when collector rejects OPTIONS with 404", () =>
 		Effect.gen(function* () {
 			const previousFetch = globalThis.fetch;
-			globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 404 }))) as typeof fetch;
+			globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 404 }))) as unknown as typeof fetch;
 
 			yield* Effect.gen(function* () {
 				const loggers = yield* Logger.CurrentLoggers;
@@ -248,7 +273,7 @@ describe("belfry CLI", () => {
 	it.effect("keeps telemetry enabled when collector rejects OPTIONS with 401", () =>
 		Effect.gen(function* () {
 			const previousFetch = globalThis.fetch;
-			globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as typeof fetch;
+			globalThis.fetch = (() => Promise.resolve(new Response(null, { status: 401 }))) as unknown as typeof fetch;
 
 			yield* Effect.gen(function* () {
 				const loggers = yield* Logger.CurrentLoggers;
@@ -282,14 +307,36 @@ describe("belfry CLI", () => {
 		}).pipe(Effect.provide(withoutConsoleLogger)),
 	);
 
+	it("uses the configured web auto-open preference with an explicit no-open override", () => {
+		assert.strictEqual(shouldOpenWebWorkspace(true, false), true);
+		assert.strictEqual(shouldOpenWebWorkspace(false, false), false);
+		assert.strictEqual(shouldOpenWebWorkspace(true, true), false);
+	});
+
 	it.effect("prints CLI failures to stderr through the failure reporting module", () =>
 		Effect.gen(function* () {
 			const error = new InvalidConfigPath({ value: "" });
 			yield* Effect.flip(handleCliFailure.InvalidConfigPath(error));
+			yield* reportTuiFailure({
+				_tag: "TuiFailure",
+				code: "session_write_failed",
+				message: "Could not save the TUI Workspace session.",
+			} as Parameters<typeof reportTuiFailure>[0]);
+			yield* Effect.flip(
+				handleCliFailure.WebBrowserFailure({
+					_tag: "WebBrowserFailure",
+					code: "browser_open_failed",
+					message: "Could not open the browser. Open the URL manually.",
+				} as Parameters<typeof handleCliFailure.WebBrowserFailure>[0]),
+			);
 
 			const stderr = yield* TestConsole.errorLines;
 
-			assert.deepStrictEqual(stderr, ['Invalid BELFRY_CONFIG_PATH value "". Expected a non-empty path.']);
+			assert.deepStrictEqual(stderr, [
+				'Invalid BELFRY_CONFIG_PATH value "". Expected a non-empty path.',
+				"Could not save the TUI Workspace session.",
+				"Could not open the browser. Open the URL manually.",
+			]);
 		}).pipe(Effect.provide(TestConsole.layer)),
 	);
 

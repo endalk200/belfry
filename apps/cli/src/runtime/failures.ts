@@ -1,5 +1,10 @@
 import { formatConfigError } from "@belfry/config";
+import type { DaemonLifecycleFailure } from "@belfry/daemon/lifecycle";
+import type { TuiFailure } from "@belfry/tui";
 import { Cause, Console, Data, Effect } from "effect";
+
+import type { DatabaseOperationFailure } from "../cli/commands/database/index.js";
+import type { WebBrowserFailure } from "../cli/commands/web.cmd.js";
 
 export class ConfigValidationFailed extends Data.TaggedError("ConfigValidationFailed") {}
 
@@ -17,13 +22,22 @@ export const handleCliFailure = {
 		printAndFail(error, formatConfigError(error)),
 	InvalidConfigPath: (error: Parameters<typeof formatConfigError>[0]) =>
 		printAndFail(error, formatConfigError(error)),
+	InvalidBelfryConfiguration: (error: Parameters<typeof formatConfigError>[0]) =>
+		printAndFail(error, formatConfigError(error)),
+	InvalidBelfryEnvironment: (error: Parameters<typeof formatConfigError>[0]) =>
+		printAndFail(error, formatConfigError(error)),
 	InvalidTelemetryEndpoint: (error: Parameters<typeof formatConfigError>[0]) =>
 		printAndFail(error, formatConfigError(error)),
 	InvalidTelemetryEnvironment: (error: Parameters<typeof formatConfigError>[0]) =>
 		printAndFail(error, formatConfigError(error)),
+	DaemonLifecycleFailure: (error: DaemonLifecycleFailure) => printAndFail(error, error.message),
+	DatabaseOperationFailure: (error: DatabaseOperationFailure) => printAndFail(error, error.message),
+	WebBrowserFailure: (error: WebBrowserFailure) => printAndFail(error, error.message),
 } as const;
 
-const handledCliFailureTags = new Set(Object.keys(handleCliFailure));
+export const reportTuiFailure = (error: TuiFailure) => Console.error(error.message);
+
+const handledCliFailureTags = new Set([...Object.keys(handleCliFailure), "TuiFailure"]);
 
 const isHandledCliFailure = (error: unknown): boolean =>
 	typeof error === "object" &&

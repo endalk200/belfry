@@ -1,0 +1,28 @@
+{
+	"name": "@belfry/otlp-proto",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./generated/otlp.d.ts",
+			"default": "./generated/otlp.js"
+		}
+	},
+	"scripts": {
+		"check-types": "tsc -p tsconfig.json --noEmit",
+		"format": "biome format --write package.json tsconfig.json README.md",
+		"format:check": "biome format package.json tsconfig.json README.md",
+		"lint": "biome check package.json tsconfig.json README.md",
+		"lint:fix": "biome check --fix package.json tsconfig.json README.md",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"protobufjs": "^8.7.0"
+	},
+	"devDependencies": {
+		"@belfry/typescript-config": "workspace:*",
+		"typescript": "6.0.3",
+		"vitest": "^4.1.10"
+	}
+}

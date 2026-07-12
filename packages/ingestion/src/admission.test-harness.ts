@@ -1,0 +1,218 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openTelemetryReader } from "@belfry/storage";
+import { Effect } from "effect";
+
+import { openIngestionAdmission } from "./admission.js";
+import { failingWriterWorkerUrl } from "./test-support.js";
+
+const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+const spanId = "00f067aa0ba902b7";
+const stateDirectory = mkdtempSync(join(tmpdir(), "belfry-ingestion-"));
+const databasePath = join(stateDirectory, "telemetry.db");
+const encoder = new TextEncoder();
+
+const program = Effect.scoped(
+	Effect.gen(function* () {
+		const admission = yield* openIngestionAdmission({
+			storage: { databasePath },
+			maxCompressedBytes: 16_384,
+			maxDecompressedBytes: 65_536,
+			queueRequestCapacity: 4,
+			queueByteCapacity: 65_536,
+			drainTimeoutMs: 5_000,
+			retentionMaxAgeNs: 604_800_000_000_000n,
+			retentionMaxBytes: 1_073_741_824n,
+			retentionBatchSize: 100,
+		});
+		const reservation = yield* admission.reserve(
+			{ signal: "traces", contentType: "application/json", contentEncoding: "identity" },
+			4_096,
+		);
+		const reservedSnapshot = yield* admission.snapshot;
+		yield* reservation.release;
+		const releasedSnapshot = yield* admission.snapshot;
+		const traceResult = yield* admission.submit({
+			signal: "traces",
+			contentType: "application/json; charset=utf-8",
+			body: encoder.encode(JSON.stringify(tracePayload())),
+		});
+		const logBytes = encoder.encode(JSON.stringify(logPayload()));
+		const logResult = yield* admission.submit({
+			signal: "logs",
+			contentType: "application/json",
+			contentEncoding: "gzip",
+			body: new Uint8Array(Bun.gzipSync(logBytes)),
+		});
+
+		const malformed = yield* Effect.result(
+			admission.submit({
+				signal: "traces",
+				contentType: "application/x-protobuf",
+				body: Uint8Array.of(0xff, 0xff),
+			}),
+		);
+		const oversized = yield* Effect.result(
+			admission.submit({
+				signal: "logs",
+				contentType: "application/json",
+				body: new Uint8Array(16_385),
+			}),
+		);
+		const decompressedOversized = yield* Effect.result(
+			admission.submit({
+				signal: "logs",
+				contentType: "application/json",
+				contentEncoding: "gzip",
+				body: new Uint8Array(
+					Bun.gzipSync(encoder.encode(JSON.stringify({ resourceLogs: [], padding: "x".repeat(70_000) }))),
+				),
+			}),
+		);
+		const reader = yield* openTelemetryReader({ databasePath });
+		const traces = yield* reader.searchTraces({
+			fromNs: 1_781_419_000_000_000_000n,
+			toNs: 1_781_421_000_000_000_000n,
+			services: [],
+			attributes: [],
+			sort: "newest",
+			limit: 100,
+		});
+		const logs = yield* reader.searchLogs({
+			fromNs: 1_781_419_000_000_000_000n,
+			toNs: 1_781_421_000_000_000_000n,
+			services: [],
+			attributes: [],
+			sort: "newest",
+			limit: 100,
+		});
+		const snapshot = yield* admission.snapshot;
+		const stats = yield* reader.ingestionStats;
+		return {
+			reservedBeforeBody:
+				reservedSnapshot.queueDepth === 1 &&
+				reservedSnapshot.queueBytes === 4_096 &&
+				releasedSnapshot.queueDepth === 0,
+			traceRecords: traceResult.records,
+			logRecords: logResult.records,
+			traceCount: traces.items.length,
+			logCount: logs.items.length,
+			traceId: traces.items[0]?.traceId,
+			malformedCode:
+				malformed._tag === "Failure" && "code" in malformed.failure ? malformed.failure.code : undefined,
+			oversizedStage:
+				oversized._tag === "Failure" && "stage" in oversized.failure ? oversized.failure.stage : undefined,
+			decompressedLimit:
+				decompressedOversized._tag === "Failure" && "limitBytes" in decompressedOversized.failure
+					? decompressedOversized.failure.limitBytes
+					: undefined,
+			decompressedActual:
+				decompressedOversized._tag === "Failure" && "actualBytes" in decompressedOversized.failure
+					? decompressedOversized.failure.actualBytes
+					: undefined,
+			rejectedRequests: stats.rejectedRequests.toString(),
+			decodeErrors: stats.decodeErrors.toString(),
+			queueDepth: snapshot.queueDepth,
+			unpersistedRejectedRequests: snapshot.unpersistedRejectedRequests.toString(),
+			droppedDiagnostics: snapshot.droppedDiagnostics.toString(),
+			writeLatencyP95Ms: snapshot.writeLatencyP95Ms,
+			writerFailure: snapshot.writerFailure,
+		};
+	}),
+);
+
+const result = await Effect.runPromise(program);
+const failedWorker = await Effect.runPromise(
+	Effect.scoped(
+		Effect.gen(function* () {
+			const admission = yield* openIngestionAdmission({
+				storage: { databasePath: join(stateDirectory, "unused-failing-worker.db") },
+				maxCompressedBytes: 16_384,
+				maxDecompressedBytes: 65_536,
+				queueRequestCapacity: 2,
+				queueByteCapacity: 32_768,
+				drainTimeoutMs: 100,
+				retentionMaxAgeNs: 604_800_000_000_000n,
+				retentionMaxBytes: 1_073_741_824n,
+				retentionBatchSize: 100,
+				workerUrl: failingWriterWorkerUrl,
+			});
+			const submitted = yield* Effect.result(
+				admission.submit({
+					signal: "traces",
+					contentType: "application/json",
+					body: encoder.encode(JSON.stringify(tracePayload())),
+				}),
+			);
+			const snapshot = yield* admission.snapshot;
+			return {
+				submitFailed: submitted._tag === "Failure",
+				accepting: snapshot.accepting,
+				writerFailure: snapshot.writerFailure,
+				unpersistedRejectedRequests: snapshot.unpersistedRejectedRequests.toString(),
+				droppedDiagnostics: snapshot.droppedDiagnostics.toString(),
+			};
+		}),
+	),
+);
+console.log(`BELFRY_TEST_RESULT=${JSON.stringify({ ...result, failedWorker })}`);
+
+function tracePayload() {
+	return {
+		resourceSpans: [
+			{
+				resource: { attributes: resourceAttributes() },
+				scopeSpans: [
+					{
+						scope: { name: "integration" },
+						spans: [
+							{
+								traceId,
+								spanId,
+								name: "GET /ready",
+								kind: 2,
+								startTimeUnixNano: "1781420000000000001",
+								endTimeUnixNano: "1781420000001000001",
+								status: { code: 1 },
+							},
+						],
+					},
+				],
+			},
+		],
+	};
+}
+
+function logPayload() {
+	return {
+		resourceLogs: [
+			{
+				resource: { attributes: resourceAttributes() },
+				scopeLogs: [
+					{
+						scope: { name: "integration" },
+						logRecords: [
+							{
+								timeUnixNano: "1781420000000500001",
+								severityNumber: 9,
+								severityText: "INFO",
+								body: { stringValue: "ready" },
+								traceId,
+								spanId,
+							},
+						],
+					},
+				],
+			},
+		],
+	};
+}
+
+function resourceAttributes() {
+	return [
+		{ key: "service.namespace", value: { stringValue: "tests" } },
+		{ key: "service.name", value: { stringValue: "worker" } },
+		{ key: "deployment.environment.name", value: { stringValue: "integration" } },
+	];
+}
