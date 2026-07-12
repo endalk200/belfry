@@ -315,7 +315,7 @@ export function TelemetryWorkbench({
 			<main className={showingTraceDetail ? "workspace-main detail-mode" : "workspace-main"}>
 				{showingTraceDetail ? (
 					traceDetail === undefined ? (
-						<LoadingPanel label="Loading complete trace…" />
+						<LoadingPanel label="Loading trace…" />
 					) : (
 						<TraceDetailView
 							trace={traceDetail}
@@ -328,13 +328,6 @@ export function TelemetryWorkbench({
 					)
 				) : (
 					<>
-						<div className="result-heading">
-							<div>
-								<p className="eyebrow">RECENT TELEMETRY</p>
-								<h1>{workspace.signal === "traces" ? "Trace search" : "Log search"}</h1>
-							</div>
-							<span>{activeItems.length} visible records</span>
-						</div>
 						{activeItems.length === 0 && phase !== "loading" && phase !== "reconnecting" ? (
 							<EmptyResults
 								signal={workspace.signal}
@@ -363,7 +356,7 @@ export function TelemetryWorkbench({
 							<LogList items={logs} selectedLogId={workspace.selectedLogId} onSelect={selectLog} />
 						) : null}
 						{(phase === "loading" || phase === "reconnecting") && activeItems.length === 0 ? (
-							<LoadingPanel label="Loading bounded telemetry…" />
+							<LoadingPanel label="Loading telemetry…" />
 						) : null}
 					</>
 				)}

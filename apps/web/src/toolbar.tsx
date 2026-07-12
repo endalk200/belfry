@@ -4,6 +4,7 @@ import { formatService, type WorkspaceSignal, type WorkspaceState } from "@belfr
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AdvancedFilters, countAdvancedFilters, formatMilliseconds } from "./advanced-filters.js";
+import { ChevronDownIcon, PauseIcon, PlayIcon, RefreshIcon, SearchIcon } from "./icons.js";
 
 export type WorkbenchPhase = "loading" | "ready" | "stale" | "invalid" | "reconnecting" | "unavailable";
 
@@ -78,6 +79,19 @@ export function WorkspaceToolbar({
 	};
 	const advancedFilterCount = countAdvancedFilters(workspace);
 
+	useEffect(() => {
+		const dismiss = (event: PointerEvent) => {
+			if (!(event.target instanceof Node)) return;
+			for (const picker of document.querySelectorAll<HTMLDetailsElement>(
+				"details.service-picker[open], details.advanced-picker[open]",
+			)) {
+				if (!picker.contains(event.target)) picker.open = false;
+			}
+		};
+		document.addEventListener("pointerdown", dismiss);
+		return () => document.removeEventListener("pointerdown", dismiss);
+	}, []);
+
 	return (
 		<>
 			<header className="topbar">
@@ -125,7 +139,7 @@ export function WorkspaceToolbar({
 						Search {workspace.signal}
 					</label>
 					<span aria-hidden="true" className="search-icon">
-						⌕
+						<SearchIcon />
 					</span>
 					<input
 						id="telemetry-search"
@@ -142,7 +156,13 @@ export function WorkspaceToolbar({
 
 				<details className="service-picker">
 					<summary aria-label={`Filter Services, ${workspace.serviceFilter.length} selected`}>
-						Services <span className="filter-count">{workspace.serviceFilter.length || "all"}</span>
+						Services{" "}
+						<span className={workspace.serviceFilter.length > 0 ? "filter-count engaged" : "filter-count"}>
+							{workspace.serviceFilter.length || "all"}
+						</span>
+						<span className="summary-chevron" aria-hidden="true">
+							<ChevronDownIcon />
+						</span>
 					</summary>
 					<div className="service-popover">
 						<label htmlFor="service-search">Find a Service</label>
@@ -154,7 +174,9 @@ export function WorkspaceToolbar({
 						/>
 						<fieldset>
 							<legend className="sr-only">Services</legend>
-							{visibleServices.length === 0 ? <p>No matching Services in this range.</p> : null}
+							{visibleServices.length === 0 ? (
+								<p className="popover-empty">No Services in this time range.</p>
+							) : null}
 							{visibleServices.map(({ service, spanCount, logCount }) => {
 								const key = serviceIdentityKey(service);
 								return (
@@ -201,6 +223,9 @@ export function WorkspaceToolbar({
 							</option>
 						))}
 					</select>
+					<span className="summary-chevron" aria-hidden="true">
+						<ChevronDownIcon />
+					</span>
 				</label>
 
 				<label className="select-control">
@@ -210,6 +235,9 @@ export function WorkspaceToolbar({
 						<option value="oldest">Oldest</option>
 						{workspace.signal === "traces" ? <option value="slowest">Slowest</option> : null}
 					</select>
+					<span className="summary-chevron" aria-hidden="true">
+						<ChevronDownIcon />
+					</span>
 				</label>
 
 				<div className="filter-actions">
@@ -223,13 +251,15 @@ export function WorkspaceToolbar({
 						aria-label="Refresh now"
 						title="Refresh now"
 					>
-						↻
+						<RefreshIcon />
 					</button>
 					<button
 						type="button"
 						className={workspace.refreshPaused ? "pause active" : "pause"}
 						onClick={onPause}
+						title={workspace.refreshPaused ? "Resume live refresh" : "Pause live refresh"}
 					>
+						{workspace.refreshPaused ? <PlayIcon /> : <PauseIcon />}
 						{workspace.refreshPaused ? "Resume" : "Pause"}
 					</button>
 				</div>
