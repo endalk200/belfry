@@ -103,6 +103,8 @@ export function TelemetryWorkspaceView({
 	logsRef.current = logs;
 
 	const wide = dimensions.width >= 110;
+	const detailPaneWidth = wide ? Math.floor(dimensions.width * 0.55) - 4 : dimensions.width - 4;
+	const waterfallBarWidth = Math.max(12, Math.min(36, Math.floor(detailPaneWidth * 0.32)));
 	const listHeight = Math.max(3, dimensions.height - 9);
 	const activeRows = workspace.signal === "traces" ? traces : logs;
 	const activeIds = activeRows.map((row) =>
@@ -122,8 +124,9 @@ export function TelemetryWorkspaceView({
 				Math.max(4, Math.floor((dimensions.height - 12) / 2)),
 				traceDetail?.durationNs,
 				waterfallScale,
+				waterfallBarWidth,
 			),
-		[dimensions.height, spanIndex, traceDetail?.durationNs, waterfallRows, waterfallScale],
+		[dimensions.height, spanIndex, traceDetail?.durationNs, waterfallBarWidth, waterfallRows, waterfallScale],
 	);
 
 	useEffect(() => onWorkspaceChange?.(workspace), [onWorkspaceChange, workspace]);
