@@ -21,7 +21,7 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.strictEqual(result.needsMore, false);
 	});
 
-	it("serves health, durable OTLP, bounded queries, OpenAPI, and packaged docs on loopback", () => {
+	it("serves health, durable OTLP, bounded queries, and OpenAPI on loopback", () => {
 		const result = runHarness();
 
 		assert.strictEqual(result.host, "127.0.0.1");
@@ -82,12 +82,12 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.strictEqual(result.diagnosticsHasCursor, true);
 		assert.strictEqual(result.diagnosticsSecondCount, 1);
 		assert.strictEqual(result.openapiHasTraceSearch, true);
-		assert.strictEqual(result.docsHasEvidenceWorkflow, true);
+		assert.strictEqual(result.removedDocsStatus, 404);
+		assert.strictEqual(result.removedDocsApiStatus, 404);
 		assert.strictEqual(result.degradedHealthStatus, 200);
 		assert.strictEqual(result.degradedStatus, "degraded");
 		assert.strictEqual(result.degradedWriterReady, false);
 		assert.strictEqual(result.degradedReadsAvailable, false);
-		assert.strictEqual(result.degradedDocsStatus, 200);
 		assert.strictEqual(result.degradedQueryStatus, 503);
 		assert.strictEqual(result.degradedQueryCode, "store_unavailable");
 		assert.strictEqual(result.degradedStatsStatus, 503);

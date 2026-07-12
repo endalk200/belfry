@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DocumentationServiceShape } from "@belfry/docs";
 import {
 	type IngestionAdmissionService,
 	type IngestionError,
@@ -31,22 +30,6 @@ export const makeOtlpRoutes = (admission: IngestionAdmissionService, maxCompress
 		HttpRouter.route("OPTIONS", "/v1/logs", HttpServerResponse.empty({ status: 204, headers: otlpCorsHeaders })),
 	]);
 
-export const makeDocumentationRoutes = (documentation: DocumentationServiceShape) =>
-	HttpRouter.addAll(
-		["getting-started", "instrumentation", "troubleshooting", "privacy", "belfry-debug"].map((slug) =>
-			HttpRouter.route(
-				"GET",
-				`/docs/${slug}`,
-				documentation.read(slug).pipe(
-					Effect.map((content) =>
-						HttpServerResponse.text(content, { contentType: "text/markdown; charset=utf-8" }),
-					),
-					Effect.catch((error) => Effect.succeed(HttpServerResponse.text(error.message, { status: 404 }))),
-				),
-			),
-		),
-	);
-
 export type WebInterfacePreferences = {
 	readonly refreshIntervalMs: number;
 	readonly defaultRangeMinutes: number;
@@ -71,7 +54,7 @@ export const makeWebRoutes = (
 			"GET",
 			"/*",
 			HttpServerResponse.text(
-				`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Belfry web assets unavailable</title></head><body><main><h1>Web assets unavailable</h1><p>Run <code>bun run build</code> or reinstall Belfry. The Daemon and Query API are still available.</p><p><a href="/api/health">Health</a> · <a href="/docs/troubleshooting">Troubleshooting</a></p></main></body></html>`,
+				`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Belfry web assets unavailable</title></head><body><main><h1>Web assets unavailable</h1><p>Run <code>bun run build</code> or reinstall Belfry. The Daemon and Query API are still available.</p><p><a href="/api/health">Health</a> · <a href="/openapi.json">OpenAPI</a></p></main></body></html>`,
 				{ status: 503, contentType: "text/html; charset=utf-8" },
 			),
 		);

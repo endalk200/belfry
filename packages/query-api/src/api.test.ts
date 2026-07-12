@@ -114,7 +114,7 @@ describe("Belfry Query API contract", () => {
 		assert.include(paths, "/api/facets");
 		assert.include(paths, "/api/ingestion/stats");
 		assert.include(paths, "/api/ingestion/diagnostics");
-		assert.include(paths, "/api/docs");
+		assert.notInclude(paths, "/api/docs");
 		assert.notInclude(paths, "/api/sql");
 		assert.notInclude(paths, "/api/metrics");
 		assert.strictEqual(document.info.title, "Belfry Query API");

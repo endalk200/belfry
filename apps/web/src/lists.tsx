@@ -219,7 +219,7 @@ export function EmptyResults({
 				<button type="button" onClick={onClear}>
 					Clear filters
 				</button>{" "}
-				<a href="/docs/getting-started">Exporter setup</a> <a href={diagnostics}>Ingestion diagnostics</a>
+				<a href={diagnostics}>Ingestion diagnostics</a>
 			</div>
 		</div>
 	);

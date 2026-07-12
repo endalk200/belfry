@@ -31,7 +31,6 @@
 	},
 	"dependencies": {
 		"@belfry/config": "workspace:*",
-		"@belfry/docs": "workspace:*",
 		"@belfry/ingestion": "workspace:*",
 		"@belfry/query-api": "workspace:*",
 		"@belfry/storage": "workspace:*",

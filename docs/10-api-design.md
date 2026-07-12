@@ -19,10 +19,8 @@ encoding, tagged errors, the typed client, and generated OpenAPI.
 | `POST` | `/api/facets` | Bounded filter values/counts |
 | `GET` | `/api/ingestion/stats` | Accepted/rejected counts, latency, queue, retention |
 | `GET` | `/api/ingestion/diagnostics` | Persisted bounded diagnostics |
-| `GET` | `/api/docs` | Packaged documentation index and debugging skill |
 
-Generated OpenAPI is served at `/openapi.json`. Human-readable packaged content
-is served at `/docs/:slug`.
+Generated OpenAPI is served at `/openapi.json`.
 
 ## Validation and errors
 
