@@ -2,7 +2,6 @@ import type { ServiceSummary } from "@belfry/query-api";
 import type { LogDetail, LogSummary, ServiceIdentity, TraceDetail, TraceSummary } from "@belfry/telemetry";
 import {
 	advanceWorkspaceTimeRange,
-	emptyWorkspaceMessage,
 	initialWorkspaceState,
 	presentWorkspaceError,
 	transitionWorkspace,
@@ -55,7 +54,6 @@ export function TelemetryWorkbench({
 	const [traceDetail, setTraceDetail] = useState<TraceDetail>();
 	const [logDetail, setLogDetail] = useState<LogDetail>();
 	const [phase, setPhase] = useState<WorkbenchPhase>("loading");
-	const [message, setMessage] = useState("Connecting to the local Daemon…");
 	const [notice, setNotice] = useState("");
 
 	const commitState = useCallback((next: WorkspaceState, mode: "push" | "replace" = "push") => {
@@ -94,10 +92,9 @@ export function TelemetryWorkbench({
 			.then((connected) => {
 				if (!cancelled) setDataSource(connected);
 			})
-			.catch((error) => {
+			.catch(() => {
 				if (cancelled) return;
 				setPhase("unavailable");
-				setMessage(`Daemon unavailable: ${errorMessage(error)}`);
 			});
 		return () => {
 			cancelled = true;
@@ -145,11 +142,6 @@ export function TelemetryWorkbench({
 			});
 			if (refreshed !== latest) commitState(refreshed, "replace");
 			setPhase("ready");
-			setMessage(
-				resultPage.items.length === 0
-					? emptyWorkspaceMessage(current.signal)
-					: `${resultPage.items.length} ${current.signal} · bounded to ${resultPage.bounds.limit} results${resultPage.truncated ? " · more available" : ""}`,
-			);
 		} catch (error) {
 			if (
 				generation !== refreshGenerationRef.current ||
@@ -159,7 +151,6 @@ export function TelemetryWorkbench({
 			const hasData = current.signal === "traces" ? tracesRef.current.length > 0 : logsRef.current.length > 0;
 			const presentation = presentWorkspaceError(error);
 			setPhase(presentation.kind === "invalid-query" ? "invalid" : hasData ? "stale" : "unavailable");
-			setMessage(`${presentation.message}${hasData ? " · showing retained results" : ""}`);
 		}
 	}, [commitState, dataSource]);
 
@@ -211,7 +202,7 @@ export function TelemetryWorkbench({
 				}
 			})
 			.catch((error) => {
-				if (!cancelled) setMessage(presentWorkspaceError(error).message);
+				if (!cancelled) setNotice(presentWorkspaceError(error).message);
 			});
 		return () => {
 			cancelled = true;
@@ -232,7 +223,7 @@ export function TelemetryWorkbench({
 				if (!cancelled) setLogDetail(detail);
 			})
 			.catch((error) => {
-				if (!cancelled) setMessage(presentWorkspaceError(error).message);
+				if (!cancelled) setNotice(presentWorkspaceError(error).message);
 			});
 		return () => {
 			cancelled = true;
@@ -305,7 +296,6 @@ export function TelemetryWorkbench({
 				workspace={workspace}
 				services={services}
 				phase={phase}
-				message={message}
 				endpoint={endpoint}
 				maxRangeMinutes={queryMaxLookbackMinutes}
 				onSignal={(signal) => dispatchWorkspaceAction({ type: "signal-changed", signal })}
@@ -409,8 +399,6 @@ const LoadingPanel = ({ label }: { readonly label: string }) => (
 		{label}
 	</div>
 );
-
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const workspaceQueryRevision = (workspace: WorkspaceState): string =>
 	JSON.stringify(

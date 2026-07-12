@@ -11,7 +11,6 @@ export type WorkspaceToolbarProps = {
 	readonly workspace: WorkspaceState;
 	readonly services: ReadonlyArray<ServiceSummary>;
 	readonly phase: WorkbenchPhase;
-	readonly message: string;
 	readonly endpoint: string;
 	readonly maxRangeMinutes: number;
 	readonly onSignal: (signal: WorkspaceSignal) => void;
@@ -30,7 +29,6 @@ export function WorkspaceToolbar({
 	workspace,
 	services,
 	phase,
-	message,
 	endpoint,
 	maxRangeMinutes,
 	onSignal,
@@ -90,12 +88,10 @@ export function WorkspaceToolbar({
 						</span>
 						<span>Belfry</span>
 					</a>
-					<span className="local-label">LOCAL WORKBENCH</span>
 				</div>
 				<div className={`connection connection-${phase}`} role="status" aria-live="polite">
 					<span className="connection-glyph" aria-hidden="true" />
 					<span>{phase === "ready" ? "Live" : phase}</span>
-					<span className="connection-message">{message}</span>
 				</div>
 			</header>
 
