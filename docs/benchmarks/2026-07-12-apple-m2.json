@@ -1,0 +1,320 @@
+{
+	"schemaVersion": 2,
+	"generatedAt": "2026-07-12T05:35:05.756Z",
+	"passed": true,
+	"product": {
+		"package": "@belfry/cli@0.0.1",
+		"runtime": "Bun 1.3.14",
+		"publicEntry": "apps/cli/dist/bin.js"
+	},
+	"referenceEnvironment": {
+		"platform": "darwin 25.5.0 arm64",
+		"cpu": "Apple M2",
+		"logicalCpus": 8,
+		"totalMemoryMb": 24576,
+		"freeMemoryMbAtReport": 2199
+	},
+	"dataset": {
+		"traces": 100,
+		"spans": 6400,
+		"logs": 8000,
+		"largeTraceSpans": 1000,
+		"traceRequestBytes": 2392121,
+		"logRequestBytes": 3042912,
+		"largeTraceRequestBytes": 313204
+	},
+	"lifecycle": {
+		"coldFirstFrameMs": {
+			"medianMs": 595.156292,
+			"p95Ms": 632.2884999999999,
+			"samplesMs": [
+				594.2549170000001,
+				595.156292,
+				632.2884999999999
+			]
+		},
+		"warmAdoptionMs": {
+			"medianMs": 217.71937500000013,
+			"p95Ms": 222.20387500000015,
+			"samplesMs": [
+				218.22608400000036,
+				216.710333,
+				217.43733399999974,
+				217.71937500000013,
+				222.20387500000015
+			]
+		},
+		"warmFirstFrameMs": 259.16704200000004,
+		"foregroundDaemonReadyMs": 330.3538330000001
+	},
+	"ingestion": {
+		"traceIngestMs": {
+			"medianMs": 590.8564159999996,
+			"p95Ms": 597.5284580000007,
+			"samplesMs": [
+				590.8564159999996,
+				588.8108339999999,
+				597.5284580000007
+			]
+		},
+		"logIngestMs": {
+			"medianMs": 424.03504200000134,
+			"p95Ms": 456.5023340000007,
+			"samplesMs": [
+				456.5023340000007,
+				421.31695899999977,
+				424.03504200000134
+			]
+		},
+		"primaryDatasetSetup": {
+			"traceMs": 601.0016249999999,
+			"logWithConcurrentQueriesMs": 440.3427499999998
+		},
+		"queryUnderIngestMaxMs": 45.772000000000844,
+		"queueDepthAfter": 0,
+		"queueBytesAfter": "0",
+		"databaseSizeBytesBeforeRepeatedIngest": "32124928",
+		"databaseSizeBytesAfterRepeatedIngest": "32239616",
+		"databaseGrowthBytes": 114688
+	},
+	"queries": {
+		"traces": {
+			"medianMs": 4.272957999999562,
+			"p95Ms": 9.96875,
+			"samplesMs": [
+				10.041166000000885,
+				5.253875000000335,
+				4.641167000001587,
+				5.689542000000074,
+				4.229083000000173,
+				3.892374999999447,
+				3.7325829999990674,
+				4.382874999999331,
+				4.272957999999562,
+				5.277249999999185,
+				9.96875,
+				4.356082999998762,
+				3.333874999998443,
+				3.3956249999991996,
+				4.528500000000349,
+				4.115249999998923,
+				3.4179579999999987,
+				3.4659579999988637,
+				4.762249999999767,
+				3.5172089999996388
+			]
+		},
+		"traceText": {
+			"medianMs": 3.458708000000115,
+			"p95Ms": 4.50683299999946,
+			"samplesMs": [
+				3.553790999998455,
+				3.1470829999998386,
+				3.3821250000000873,
+				3.2707080000000133,
+				3.342040999999881,
+				4.24474999999984,
+				3.3517919999994774,
+				2.973583000000872,
+				2.8672090000000026,
+				3.0781669999996666,
+				3.776750000000902,
+				4.50683299999946,
+				3.73962500000016,
+				3.5096659999999247,
+				3.902915999999095,
+				5.373750000000655,
+				3.9643749999995634,
+				3.4335420000006707,
+				3.458708000000115,
+				3.6148750000011205
+			]
+		},
+		"logs": {
+			"medianMs": 5.009334000000308,
+			"p95Ms": 5.9618329999993875,
+			"samplesMs": [
+				5.989208000000872,
+				5.561999999999898,
+				5.71454199999971,
+				4.877791999999317,
+				5.009334000000308,
+				4.683958999999959,
+				5.785625000000437,
+				5.958082999999533,
+				4.934459000000061,
+				5.198333000000275,
+				4.419665999999779,
+				5.286292000000685,
+				4.579417000000831,
+				5.714583000000857,
+				4.699291000000812,
+				4.964874999999665,
+				4.475875000000087,
+				5.935582999998587,
+				5.9618329999993875,
+				4.745542000000569
+			]
+		},
+		"logText": {
+			"medianMs": 35.344458999999915,
+			"p95Ms": 36.16608300000007,
+			"samplesMs": [
+				35.24262499999895,
+				34.95654099999956,
+				35.22208299999875,
+				35.94954200000029,
+				36.73333300000013,
+				35.813875000001644,
+				35.72016699999949,
+				35.55554200000006,
+				36.16608300000007,
+				35.42895899999894,
+				35.16254200000003,
+				35.603250000000116,
+				35.54391599999872,
+				35.6594159999986,
+				35.2841669999998,
+				34.957791999999245,
+				34.939416000001074,
+				34.99516699999913,
+				35.344458999999915,
+				35.211208999999144
+			]
+		},
+		"largeTrace": {
+			"medianMs": 75.76841699999932,
+			"p95Ms": 79.87941599999976,
+			"samplesMs": [
+				79.87941599999976,
+				77.16458299999977,
+				76.82345799999894,
+				73.6859999999997,
+				75.76841699999932,
+				75.49825000000055,
+				76.65991699999904,
+				70.37575000000106,
+				71.84833299999991,
+				76.59912499999882
+			]
+		}
+	},
+	"interface": {
+		"largeTraceInteractiveMs": 302.92974999999933,
+		"renderedWaterfallRows": 20,
+		"idleHeapMb": 4.105960845947266,
+		"largeTraceHeapMb": 5.421379089355469,
+		"finalHeapMb": 5.99359130859375,
+		"heapGrowthMb": 0.5722122192382812
+	},
+	"memory": {
+		"idleDaemonRssMb": 176.90625,
+		"postWorkloadDaemonRssMb": 547.40625,
+		"repeatedIngestDaemonRssMb": 555.015625,
+		"repeatedIngestGrowthMb": 7.609375,
+		"postWorkloadProcessCount": 1,
+		"repeatedIngestProcessCount": 1,
+		"postWorkloadListenerCount": 1,
+		"repeatedIngestListenerCount": 1,
+		"idleTuiProcessTreeRssMb": 141.171875,
+		"idleWebHeapMb": 4.105960845947266
+	},
+	"thresholds": {
+		"coldDaemonAndTui": {
+			"actual": 595.156292,
+			"limit": 750,
+			"unit": "ms",
+			"pass": true
+		},
+		"warmAdoption": {
+			"actual": 217.71937500000013,
+			"limit": 250,
+			"unit": "ms",
+			"pass": true
+		},
+		"traceIngest": {
+			"actual": 590.8564159999996,
+			"limit": 2000,
+			"unit": "ms",
+			"pass": true
+		},
+		"logIngest": {
+			"actual": 424.03504200000134,
+			"limit": 500,
+			"unit": "ms",
+			"pass": true
+		},
+		"recentQueryMedian": {
+			"actual": 35.344458999999915,
+			"limit": 100,
+			"unit": "ms",
+			"pass": true
+		},
+		"recentQueryP95": {
+			"actual": 36.16608300000007,
+			"limit": 250,
+			"unit": "ms",
+			"pass": true
+		},
+		"largeTraceQuery": {
+			"actual": 75.76841699999932,
+			"limit": 250,
+			"unit": "ms",
+			"pass": true
+		},
+		"largeTraceInteractive": {
+			"actual": 302.92974999999933,
+			"limit": 500,
+			"unit": "ms",
+			"pass": true
+		},
+		"queryUnderIngest": {
+			"actual": 45.772000000000844,
+			"limit": 250,
+			"unit": "ms",
+			"pass": true
+		},
+		"daemonRssGrowthUnderRepeatedIngest": {
+			"actual": 7.609375,
+			"limit": 64,
+			"unit": "MB",
+			"pass": true
+		},
+		"webHeapGrowth": {
+			"actual": 0.5722122192382812,
+			"limit": 20,
+			"unit": "MB",
+			"pass": true
+		},
+		"daemonProcessCountGrowth": {
+			"actual": 0,
+			"limit": 0,
+			"unit": "processes",
+			"pass": true
+		},
+		"listenerCountGrowth": {
+			"actual": 0,
+			"limit": 0,
+			"unit": "listeners",
+			"pass": true
+		},
+		"databaseGrowthUnderRepeatedUpsert": {
+			"actual": 114688,
+			"limit": 4194304,
+			"unit": "bytes",
+			"pass": true
+		},
+		"queueDepthAfterRepeatedIngest": {
+			"actual": 0,
+			"limit": 0,
+			"unit": "requests",
+			"pass": true
+		},
+		"queueBytesAfterRepeatedIngest": {
+			"actual": 0,
+			"limit": 0,
+			"unit": "bytes",
+			"pass": true
+		}
+	}
+}
