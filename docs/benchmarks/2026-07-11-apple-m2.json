@@ -1,0 +1,77 @@
+{
+	"schemaVersion": 1,
+	"generatedAt": "2026-07-11T21:35:12.471Z",
+	"command": "bun run benchmark:workbench",
+	"passed": true,
+	"product": {
+		"package": "@belfry/cli@0.0.1",
+		"runtime": "Bun 1.3.14",
+		"publicEntry": "apps/cli/dist/bin.js"
+	},
+	"referenceEnvironment": {
+		"platform": "darwin 25.5.0 arm64",
+		"cpu": "Apple M2",
+		"logicalCpus": 8,
+		"totalMemoryMb": 24576
+	},
+	"dataset": {
+		"traces": 100,
+		"spans": 6400,
+		"logs": 8000,
+		"largeTraceSpans": 1000,
+		"traceRequestBytes": 2392121,
+		"logRequestBytes": 3042912,
+		"largeTraceRequestBytes": 313204
+	},
+	"measurements": {
+		"coldFirstFrameMs": {
+			"median": 588.9471669999999,
+			"p95": 656.7895839999999,
+			"samples": [542.814791, 588.9471669999999, 656.7895839999999]
+		},
+		"warmAdoptionMs": {
+			"median": 232.16304199999968,
+			"p95": 241.46233399999983,
+			"samples": [234.4415829999998, 224.6065410000001, 241.46233399999983, 232.16304199999968, 221.92662500000006]
+		},
+		"traceIngestMs": {
+			"median": 612.1690839999992,
+			"p95": 629.2522910000007,
+			"samples": [599.6867920000004, 612.1690839999992, 629.2522910000007]
+		},
+		"logIngestMs": {
+			"median": 452.58079200000066,
+			"p95": 582.4172499999986,
+			"samples": [445.14100000000053, 452.58079200000066, 582.4172499999986]
+		},
+		"recentQueryWorstMedianMs": 35.087500000001455,
+		"recentQueryWorstP95Ms": 38.35308299999997,
+		"largeTraceQueryMedianMs": 44.03266699999949,
+		"largeTraceInteractiveMs": 157.45050000000083,
+		"renderedWaterfallRows": 20,
+		"queryUnderIngestMaxMs": 25.6034580000005,
+		"idleDaemonRssMb": 152.109375,
+		"postWorkloadDaemonRssMb": 456.875,
+		"repeatedIngestDaemonRssMb": 471.46875,
+		"repeatedIngestGrowthMb": 14.59375,
+		"idleTuiProcessTreeRssMb": 139.890625,
+		"browserHeapGrowthMb": 0.5388221740722656,
+		"queueDepthAfter": 0,
+		"queueBytesAfter": "0",
+		"databaseSizeBytesBeforeRepeatedIngest": "33513472",
+		"databaseSizeBytesAfterRepeatedIngest": "33628160"
+	},
+	"thresholds": {
+		"coldDaemonAndTuiMs": { "actual": 588.9471669999999, "limit": 750, "pass": true },
+		"warmAdoptionMs": { "actual": 232.16304199999968, "limit": 250, "pass": true },
+		"traceIngestMs": { "actual": 612.1690839999992, "limit": 2000, "pass": true },
+		"logIngestMs": { "actual": 452.58079200000066, "limit": 500, "pass": true },
+		"recentQueryMedianMs": { "actual": 35.087500000001455, "limit": 100, "pass": true },
+		"recentQueryP95Ms": { "actual": 38.35308299999997, "limit": 250, "pass": true },
+		"largeTraceQueryMs": { "actual": 44.03266699999949, "limit": 250, "pass": true },
+		"largeTraceInteractiveMs": { "actual": 157.45050000000083, "limit": 500, "pass": true },
+		"queryUnderIngestMs": { "actual": 25.6034580000005, "limit": 250, "pass": true },
+		"daemonRssGrowthMb": { "actual": 14.59375, "limit": 64, "pass": true },
+		"webHeapGrowthMb": { "actual": 0.5388221740722656, "limit": 20, "pass": true }
+	}
+}
