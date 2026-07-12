@@ -25,19 +25,11 @@ async function main() {
 	if (!existsSync(cliPath)) {
 		throw new Error(`Built CLI not found at ${cliPath}. Run bun run --filter @belfry/cli build first.`);
 	}
-	if (platform() !== "darwin") {
-		throw new Error(
-			"The checked-in reference benchmark currently requires macOS /usr/bin/expect for real PTY timing.",
-		);
-	}
-
-	const coldFirstFrameSamples: Array<number> = [];
+	const coldWorkspaceUrlSamples: Array<number> = [];
 	for (let repetition = 0; repetition < lifecycleRepetitions; repetition += 1) {
 		const runtime = await temporaryRuntime("belfry-cold-");
 		try {
-			const tui = await openTui(runtime.env);
-			coldFirstFrameSamples.push(tui.firstFrameMs);
-			await closeTui(tui);
+			coldWorkspaceUrlSamples.push((await timed(() => runCli(runtime.env, ["web", "--no-open"]))).durationMs);
 			await runCli(runtime.env, ["daemon", "stop", "--json"]).catch(() => undefined);
 		} finally {
 			await rm(runtime.stateDirectory, { recursive: true, force: true });
@@ -60,18 +52,10 @@ async function main() {
 		const daemonReadyMs = await waitForHealth(endpoint, daemon);
 		const idleDaemonRssKb = await processTreeRssKb(daemon.pid);
 
-		const warmAdoptionSamples: Array<number> = [];
+		const warmWorkspaceUrlSamples: Array<number> = [];
 		for (let repetition = 0; repetition < 5; repetition += 1) {
-			warmAdoptionSamples.push(
-				(await timed(() => runCli(runtime.env, ["daemon", "start", "--json"]))).durationMs,
-			);
+			warmWorkspaceUrlSamples.push((await timed(() => runCli(runtime.env, ["web", "--no-open"]))).durationMs);
 		}
-
-		const warmTui = await openTui(runtime.env);
-		await Bun.sleep(250);
-		const idleTuiRssKb = await processTreeRssKb(warmTui.child.pid);
-		const warmFirstFrameMs = warmTui.firstFrameMs;
-		await closeTui(warmTui);
 
 		const baseNs = BigInt(Date.now()) * 1_000_000n - 120_000_000_000n;
 		const queryFromNs = baseNs - 10_000_000_000n;
@@ -181,8 +165,8 @@ async function main() {
 			BigInt(healthAfterRepeatedIngest.databaseSizeBytes) - BigInt(healthBeforeRepeatedIngest.databaseSizeBytes),
 		);
 		const thresholds = {
-			coldDaemonAndTui: threshold(median(coldFirstFrameSamples), 750),
-			warmAdoption: threshold(median(warmAdoptionSamples), 250),
+			coldDaemonAndWorkspaceUrl: threshold(median(coldWorkspaceUrlSamples), 750),
+			warmWorkspaceUrl: threshold(median(warmWorkspaceUrlSamples), 250),
 			traceIngest: threshold(median(traceIngestSamples), 2_000),
 			logIngest: threshold(median(logIngestSamples), 500),
 			recentQueryMedian: threshold(queryMedianMaxMs, 100),
@@ -209,7 +193,7 @@ async function main() {
 		const passed = Object.values(thresholds).every((result) => result.pass);
 
 		const results = {
-			schemaVersion: 2,
+			schemaVersion: 3,
 			generatedAt: new Date().toISOString(),
 			passed,
 			product: {
@@ -234,9 +218,8 @@ async function main() {
 				largeTraceRequestBytes: Buffer.byteLength(largeTraceBody),
 			},
 			lifecycle: {
-				coldFirstFrameMs: summarize(coldFirstFrameSamples),
-				warmAdoptionMs: summarize(warmAdoptionSamples),
-				warmFirstFrameMs,
+				coldWorkspaceUrlMs: summarize(coldWorkspaceUrlSamples),
+				warmWorkspaceUrlMs: summarize(warmWorkspaceUrlSamples),
 				foregroundDaemonReadyMs: daemonReadyMs,
 			},
 			ingestion: {
@@ -267,7 +250,6 @@ async function main() {
 				repeatedIngestProcessCount: repeatedIngestProcessTree.processCount,
 				postWorkloadListenerCount,
 				repeatedIngestListenerCount,
-				idleTuiProcessTreeRssMb: idleTuiRssKb / 1_024,
 				idleWebHeapMb: browserMeasurement.idleHeapMb,
 			},
 			thresholds,
@@ -288,14 +270,6 @@ type Runtime = {
 	readonly stateDirectory: string;
 	readonly port: number;
 	readonly env: Record<string, string | undefined>;
-};
-
-type OpenTui = {
-	readonly child: ReturnType<typeof Bun.spawn>;
-	readonly reader: ReadableStreamDefaultReader<Uint8Array>;
-	readonly stderr: Promise<string>;
-	readonly firstFrameMs: number;
-	readonly capture: string;
 };
 
 const temporaryRuntime = async (prefix: string): Promise<Runtime> => {
@@ -373,67 +347,6 @@ const runCli = async (env: Runtime["env"], args: ReadonlyArray<string>): Promise
 	]);
 	if (exitCode !== 0) throw new Error(`belfry ${args.join(" ")} failed (${exitCode}): ${stderr || stdout}`);
 	return stdout;
-};
-
-const openTui = async (env: Runtime["env"]): Promise<OpenTui> => {
-	const startedAt = performance.now();
-	const expectProgram = `
-		log_user 1
-		set timeout 10
-		spawn -noecho {${process.execPath}} {${cliPath}}
-		expect {
-			-re {BELFRY} {}
-			timeout { puts stderr "Timed out waiting for BELFRY"; exit 124 }
-			eof { puts stderr "Belfry exited before its first frame"; exit 125 }
-		}
-		puts "__BELFRY_FIRST_FRAME__"
-		flush stdout
-		expect_user -re {q}
-		send -- "q"
-		expect eof
-	`;
-	const child = Bun.spawn(["/usr/bin/expect", "-c", expectProgram], {
-		cwd: projectRoot,
-		env,
-		stdin: "pipe",
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
-	const stderr = new Response(child.stderr as ReadableStream<Uint8Array>).text();
-	const decoder = new TextDecoder();
-	let capture = "";
-	const deadline = Date.now() + 10_000;
-	while (!capture.includes("__BELFRY_FIRST_FRAME__")) {
-		const remaining = deadline - Date.now();
-		if (remaining <= 0) throw new Error(`Timed out waiting for the public TUI frame. ${capture.slice(-1_000)}`);
-		const chunk = await Promise.race([
-			reader.read(),
-			new Promise<undefined>((resolveTimeout) => setTimeout(resolveTimeout, remaining)),
-		]);
-		if (chunk === undefined)
-			throw new Error(`Timed out waiting for the public TUI frame. ${capture.slice(-1_000)}`);
-		if (chunk.done) {
-			throw new Error(
-				`The public TUI exited before its first frame. ${capture.slice(-1_000)} ${(await stderr).slice(-1_000)}`,
-			);
-		}
-		capture += decoder.decode(chunk.value, { stream: true });
-	}
-	return { child, reader, stderr, firstFrameMs: performance.now() - startedAt, capture };
-};
-
-const closeTui = async (tui: OpenTui): Promise<void> => {
-	const stdin = tui.child.stdin;
-	if (stdin !== undefined && typeof stdin !== "number") {
-		stdin.write("q");
-		stdin.flush();
-		stdin.end();
-	}
-	await Promise.race([tui.child.exited, Bun.sleep(5_000)]);
-	if (tui.child.exitCode === null) tui.child.kill("SIGTERM");
-	await tui.reader.cancel().catch(() => undefined);
-	await tui.stderr;
 };
 
 const waitForHealth = async (endpoint: string, child: ReturnType<typeof Bun.spawn>): Promise<number> => {
