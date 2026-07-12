@@ -10,11 +10,13 @@ import {
 	workspaceFromUrl,
 	workspaceToUrl,
 } from "@belfry/workspace";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { connectWebWorkspace, type WebWorkspaceDataSource } from "./data-source.js";
 import { LogDetailView, TraceDetailView } from "./details.js";
+import { PulseIcon } from "./icons.js";
 import { EmptyResults, LogList, TraceList } from "./lists.js";
+import { useSplitPane } from "./split-pane.js";
 import { type WorkbenchPhase, WorkspaceToolbar } from "./toolbar.js";
 
 export type TelemetryWorkbenchProps = {
@@ -55,8 +57,20 @@ export function TelemetryWorkbench({
 	const [logDetail, setLogDetail] = useState<LogDetail>();
 	const [phase, setPhase] = useState<WorkbenchPhase>("loading");
 	const [notice, setNotice] = useState("");
+	const split = useSplitPane();
 
 	const commitState = useCallback((next: WorkspaceState, mode: "push" | "replace" = "push") => {
+		const current = workspaceRef.current;
+		if (next.signal !== current.signal) {
+			setPhase("reconnecting");
+			if (next.signal === "traces") {
+				tracesRef.current = [];
+				setTraces([]);
+			} else {
+				logsRef.current = [];
+				setLogs([]);
+			}
+		}
 		workspaceRef.current = next;
 		setWorkspace(next);
 		window.history[mode === "push" ? "pushState" : "replaceState"]({}, "", workspaceToUrl(next));
@@ -101,6 +115,33 @@ export function TelemetryWorkbench({
 		};
 	}, [endpoint, providedDataSource, queryMaxResults]);
 
+	const traceDetailGenerationRef = useRef(0);
+	const loadTraceDetail = useCallback(
+		async (traceId: string, mode: "initial" | "refresh"): Promise<void> => {
+			if (dataSource === undefined) return;
+			const generation = traceDetailGenerationRef.current + 1;
+			traceDetailGenerationRef.current = generation;
+			try {
+				const detail = await dataSource.getTrace(traceId);
+				if (generation !== traceDetailGenerationRef.current || workspaceRef.current.selectedTraceId !== traceId)
+					return;
+				setTraceDetail(detail);
+				const latest = workspaceRef.current;
+				const reconciled = transitionWorkspace(latest, {
+					type: "trace-detail-loaded",
+					traceId: detail.traceId,
+					spanIds: detail.spans.map((span) => span.spanId),
+				});
+				if (reconciled !== latest) commitState(reconciled, "replace");
+			} catch (error) {
+				// Background refreshes fail quietly; the loaded detail stays useful.
+				if (mode === "initial" && workspaceRef.current.selectedTraceId === traceId)
+					setNotice(presentWorkspaceError(error).message);
+			}
+		},
+		[commitState, dataSource],
+	);
+
 	const refresh = useCallback(async () => {
 		if (dataSource === undefined) return;
 		const generation = refreshGenerationRef.current + 1;
@@ -142,6 +183,9 @@ export function TelemetryWorkbench({
 			});
 			if (refreshed !== latest) commitState(refreshed, "replace");
 			setPhase("ready");
+			// Keep an open trace detail in sync with late-arriving spans and logs.
+			const selectedTraceId = workspaceRef.current.selectedTraceId;
+			if (selectedTraceId !== undefined) void loadTraceDetail(selectedTraceId, "refresh");
 		} catch (error) {
 			if (
 				generation !== refreshGenerationRef.current ||
@@ -152,7 +196,7 @@ export function TelemetryWorkbench({
 			const presentation = presentWorkspaceError(error);
 			setPhase(presentation.kind === "invalid-query" ? "invalid" : hasData ? "stale" : "unavailable");
 		}
-	}, [commitState, dataSource]);
+	}, [commitState, dataSource, loadTraceDetail]);
 
 	const queryRevision = workspaceQueryRevision(workspace);
 	useEffect(() => {
@@ -185,29 +229,9 @@ export function TelemetryWorkbench({
 			setTraceDetail(undefined);
 			return;
 		}
-		let cancelled = false;
 		setTraceDetail((current) => (current?.traceId === traceId ? current : undefined));
-		void dataSource
-			.getTrace(traceId)
-			.then((detail) => {
-				if (!cancelled) {
-					setTraceDetail(detail);
-					const latest = workspaceRef.current;
-					const reconciled = transitionWorkspace(latest, {
-						type: "trace-detail-loaded",
-						traceId: detail.traceId,
-						spanIds: detail.spans.map((span) => span.spanId),
-					});
-					if (reconciled !== latest) commitState(reconciled, "replace");
-				}
-			})
-			.catch((error) => {
-				if (!cancelled) setNotice(presentWorkspaceError(error).message);
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [commitState, dataSource, workspace.selectedTraceId]);
+		void loadTraceDetail(traceId, "initial");
+	}, [dataSource, loadTraceDetail, workspace.selectedTraceId]);
 
 	useEffect(() => {
 		const logId = workspace.selectedLogId;
@@ -259,6 +283,13 @@ export function TelemetryWorkbench({
 		return () => window.removeEventListener("keydown", handleShortcut);
 	}, [dispatchWorkspaceAction, refreshNow]);
 
+	// Reveal the log inspector when it opens beneath an open trace detail.
+	const logDetailId = logDetail?.id;
+	useEffect(() => {
+		if (logDetailId === undefined) return;
+		document.getElementById("log-detail")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	}, [logDetailId]);
+
 	const clearFilters = () => dispatchWorkspaceAction({ type: "filters-cleared" });
 	const changeRange = (minutes: number) => {
 		const toNs = BigInt(Date.now()) * 1_000_000n;
@@ -288,6 +319,7 @@ export function TelemetryWorkbench({
 	const selectLog = (log: LogSummary) => dispatchWorkspaceAction({ type: "log-selected", log });
 
 	const showingTraceDetail = workspace.signal === "traces" && workspace.selectedTraceId !== undefined;
+	const showingDetail = showingTraceDetail || workspace.selectedLogId !== undefined;
 	const activeItems = workspace.signal === "traces" ? traces : logs;
 
 	return (
@@ -296,7 +328,6 @@ export function TelemetryWorkbench({
 				workspace={workspace}
 				services={services}
 				phase={phase}
-				endpoint={endpoint}
 				maxRangeMinutes={queryMaxLookbackMinutes}
 				onSignal={(signal) => dispatchWorkspaceAction({ type: "signal-changed", signal })}
 				onSearch={changeSearch}
@@ -312,69 +343,85 @@ export function TelemetryWorkbench({
 				onClear={clearFilters}
 			/>
 
-			<main className={showingTraceDetail ? "workspace-main detail-mode" : "workspace-main"}>
-				{showingTraceDetail ? (
-					traceDetail === undefined ? (
-						<LoadingPanel label="Loading trace…" />
-					) : (
-						<TraceDetailView
-							trace={traceDetail}
-							workspace={workspace}
+			<main
+				ref={split.containerRef}
+				className={`workbench-body${showingDetail ? " has-detail" : ""}${split.dragging ? " dragging" : ""}`}
+				style={{ "--list-fraction": `${(split.fraction * 100).toFixed(2)}%` } as CSSProperties}
+			>
+				<section className="list-pane" aria-label="Results">
+					{activeItems.length === 0 && phase !== "loading" && phase !== "reconnecting" ? (
+						<EmptyResults
+							signal={workspace.signal}
+							endpoint={endpoint}
+							fromNs={
+								workspace.signal === "traces" ? workspace.traceQuery.fromNs : workspace.logQuery.fromNs
+							}
+							toNs={workspace.signal === "traces" ? workspace.traceQuery.toNs : workspace.logQuery.toNs}
+							onClear={clearFilters}
+						/>
+					) : null}
+					{workspace.signal === "traces" && traces.length > 0 ? (
+						<TraceList
+							items={traces}
+							selectedTraceId={workspace.selectedTraceId}
+							onSelect={(trace) =>
+								dispatchWorkspaceAction({ type: "trace-selected", traceId: trace.traceId })
+							}
+						/>
+					) : null}
+					{workspace.signal === "logs" && logs.length > 0 ? (
+						<LogList items={logs} selectedLogId={workspace.selectedLogId} onSelect={selectLog} />
+					) : null}
+					{(phase === "loading" || phase === "reconnecting") && activeItems.length === 0 ? (
+						<LoadingPanel label="Loading telemetry…" />
+					) : null}
+				</section>
+
+				<div className={split.dragging ? "pane-divider dragging" : "pane-divider"} {...split.separatorProps} />
+
+				<section className="detail-pane" aria-label="Detail">
+					{showingTraceDetail ? (
+						traceDetail === undefined ? (
+							<LoadingPanel label="Loading trace…" />
+						) : (
+							<TraceDetailView
+								trace={traceDetail}
+								workspace={workspace}
+								onAction={dispatchWorkspaceAction}
+								onOpenLog={selectLog}
+								onClose={closeTrace}
+								onNotice={setNotice}
+							/>
+						)
+					) : null}
+					{logDetail !== undefined ? (
+						<LogDetailView
+							log={logDetail}
 							onAction={dispatchWorkspaceAction}
-							onOpenLog={selectLog}
-							onClose={closeTrace}
+							onClose={closeLog}
+							onOpenTrace={() =>
+								dispatchWorkspaceAction({ type: "correlated-trace-opened", log: logDetail })
+							}
 							onNotice={setNotice}
 						/>
-					)
-				) : (
-					<>
-						{activeItems.length === 0 && phase !== "loading" && phase !== "reconnecting" ? (
-							<EmptyResults
-								signal={workspace.signal}
-								endpoint={endpoint}
-								fromNs={
-									workspace.signal === "traces"
-										? workspace.traceQuery.fromNs
-										: workspace.logQuery.fromNs
-								}
-								toNs={
-									workspace.signal === "traces" ? workspace.traceQuery.toNs : workspace.logQuery.toNs
-								}
-								onClear={clearFilters}
-							/>
-						) : null}
-						{workspace.signal === "traces" && traces.length > 0 ? (
-							<TraceList
-								items={traces}
-								selectedTraceId={workspace.selectedTraceId}
-								onSelect={(trace) =>
-									dispatchWorkspaceAction({ type: "trace-selected", traceId: trace.traceId })
-								}
-							/>
-						) : null}
-						{workspace.signal === "logs" && logs.length > 0 ? (
-							<LogList items={logs} selectedLogId={workspace.selectedLogId} onSelect={selectLog} />
-						) : null}
-						{(phase === "loading" || phase === "reconnecting") && activeItems.length === 0 ? (
-							<LoadingPanel label="Loading telemetry…" />
-						) : null}
-					</>
-				)}
-
-				{logDetail !== undefined ? (
-					<LogDetailView
-						log={logDetail}
-						onAction={dispatchWorkspaceAction}
-						onClose={closeLog}
-						onOpenTrace={() => dispatchWorkspaceAction({ type: "correlated-trace-opened", log: logDetail })}
-						onNotice={setNotice}
-					/>
-				) : null}
+					) : null}
+					{!showingDetail ? (
+						<div className="detail-placeholder-pane">
+							<span aria-hidden="true">
+								<PulseIcon size={22} />
+							</span>
+							<p>Select a {workspace.signal === "traces" ? "trace" : "log"} to inspect it.</p>
+						</div>
+					) : null}
+				</section>
 			</main>
 
 			<footer className="status-bar">
-				<span>
+				<span className="shortcut-hints">
 					<kbd>/</kbd> search · <kbd>r</kbd> refresh · <kbd>p</kbd> pause · <kbd>Esc</kbd> close detail
+				</span>
+				<span className="endpoint" title={endpoint}>
+					OTLP {endpoint}
 				</span>
 				<a href="/openapi.json">OpenAPI</a>
 			</footer>

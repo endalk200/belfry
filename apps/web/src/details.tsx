@@ -19,7 +19,7 @@ import {
 } from "@belfry/workspace";
 import { useMemo, useRef, useState } from "react";
 
-import { ArrowLeftIcon, CloseIcon, CopyIcon, LogsIcon } from "./icons.js";
+import { CloseIcon, CopyIcon, LogsIcon } from "./icons.js";
 import { serviceColor } from "./palette.js";
 import { useVirtualWindow } from "./virtual-list.js";
 
@@ -44,12 +44,8 @@ export function TraceDetailView({
 	return (
 		<article className="trace-detail" aria-labelledby="trace-title">
 			<div className="detail-heading">
-				<div>
-					<button type="button" className="back-button" onClick={onClose}>
-						<ArrowLeftIcon />
-						All traces
-					</button>
-					<p className="eyebrow">TRACE DETAIL</p>
+				<div className="detail-heading-main">
+					<p className="eyebrow">TRACE</p>
 					<h1 id="trace-title">{trace.rootOperation || "Unnamed operation"}</h1>
 					<button
 						type="button"
@@ -61,12 +57,15 @@ export function TraceDetailView({
 						<CopyIcon />
 					</button>
 				</div>
-				<div className="trace-summary">
-					<SummaryMetric label="Duration" value={formatNanoseconds(trace.durationNs)} />
-					<SummaryMetric label="Spans" value={String(trace.spanCount)} />
-					<SummaryMetric label="Errors" value={String(trace.errorCount)} alert={trace.errorCount > 0} />
-					<SummaryMetric label="Services" value={String(trace.services.length)} />
-				</div>
+				<button type="button" className="detail-close" onClick={onClose} aria-label="Close trace detail">
+					<CloseIcon />
+				</button>
+			</div>
+			<div className="trace-summary">
+				<SummaryMetric label="Duration" value={formatNanoseconds(trace.durationNs)} />
+				<SummaryMetric label="Spans" value={String(trace.spanCount)} />
+				<SummaryMetric label="Errors" value={String(trace.errorCount)} alert={trace.errorCount > 0} />
+				<SummaryMetric label="Services" value={String(trace.services.length)} />
 			</div>
 			<div className="trace-context">
 				<span>{formatTimestamp(trace.startTimeNs)}</span>
@@ -173,7 +172,7 @@ function Waterfall({
 				</label>
 			</div>
 			<div className="waterfall-scroll" ref={container}>
-				<div style={{ minWidth: `${Math.round(900 * zoom)}px` }}>
+				<div style={{ minWidth: `${Math.round(100 * zoom)}%` }}>
 					<div className="waterfall-header">
 						<span>Span / Service</span>
 						<span className="time-ruler" aria-hidden="true">
