@@ -14,3 +14,17 @@ Whenever you make changes to the codebase run:
 - `bun run check-types`
 - `bun run lint`
 - `bun run test`
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local Markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage and Wayfinder labels
+
+Canonical triage and Wayfinder role names are used unchanged. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain layout. See `docs/agents/domain.md`.
