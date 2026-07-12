@@ -262,6 +262,73 @@ describe("generated OTLP decoder", () => {
 		);
 	});
 
+	it("correlates logs through conventional trace context attributes when record fields are absent", () => {
+		const json = JSON.stringify({
+			resourceLogs: [
+				{
+					resource: { attributes: resourceAttributesForJson },
+					scopeLogs: [
+						{
+							logRecords: [
+								{
+									timeUnixNano: "1781420000000000200",
+									body: { stringValue: "effect logger bridge" },
+									attributes: [
+										{ key: "traceId", value: { stringValue: traceId.toUpperCase() } },
+										{ key: "spanId", value: { stringValue: spanId } },
+									],
+								},
+								{
+									timeUnixNano: "1781420000000000201",
+									body: { stringValue: "snake case bridge" },
+									attributes: [
+										{ key: "trace_id", value: { stringValue: traceId } },
+										{ key: "span_id", value: { stringValue: spanId } },
+									],
+								},
+								{
+									timeUnixNano: "1781420000000000202",
+									body: { stringValue: "invalid attribute context stays uncorrelated" },
+									attributes: [
+										{ key: "traceId", value: { stringValue: "not-a-trace-id" } },
+										{ key: "spanId", value: { stringValue: spanId } },
+									],
+								},
+								{
+									timeUnixNano: "1781420000000000203",
+									body: { stringValue: "record fields win over attributes" },
+									traceId,
+									spanId,
+									attributes: [
+										{
+											key: "traceId",
+											value: { stringValue: "99999999999999999999999999999999" },
+										},
+										{ key: "spanId", value: { stringValue: "8888888888888888" } },
+									],
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+
+		const logs = decodeOtlpLogs(new TextEncoder().encode(json), "application/json").logs;
+
+		assert.deepStrictEqual(
+			logs.map((log) => [log.traceId, log.spanId]),
+			[
+				[traceId, spanId],
+				[traceId, spanId],
+				[undefined, undefined],
+				[traceId, spanId],
+			],
+		);
+		// Attributes are preserved untouched — correlation only fills the record fields.
+		assert.deepStrictEqual(logs[0]?.attributes.traceId, { type: "string", value: traceId.toUpperCase() });
+	});
+
 	it("marks a missing service name as unknown with setup guidance", () => {
 		const json = JSON.stringify({
 			resourceLogs: [
