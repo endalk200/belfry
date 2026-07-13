@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,14 @@ import { startDaemonServer } from "./server.js";
 const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
 const spanId = "00f067aa0ba902b7";
 const stateDirectory = mkdtempSync(join(tmpdir(), "belfry-daemon-"));
+// Keep this integration test independent of ignored Vite build output.
+const webFixtureRoot = join(stateDirectory, "web");
+mkdirSync(join(webFixtureRoot, "assets"), { recursive: true });
+writeFileSync(
+	join(webFixtureRoot, "index.html"),
+	'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Belfry · Local observability</title></head><body><div id="root"></div><script type="module" src="/assets/test-workspace.js"></script></body></html>',
+);
+writeFileSync(join(webFixtureRoot, "assets", "test-workspace.js"), "globalThis.__BELFRY_TEST_WORKSPACE__ = true;\n");
 const port = await availablePort();
 const configuration: BelfryConfiguration = {
 	...defaultBelfryConfiguration,
@@ -107,7 +115,7 @@ const slowQueryConfiguration: BelfryConfiguration = {
 const result = await Effect.runPromise(
 	Effect.scoped(
 		Effect.gen(function* () {
-			const daemon = yield* startDaemonServer({ configuration });
+			const daemon = yield* startDaemonServer({ configuration, webRoot: webFixtureRoot });
 			const webRoot = yield* Effect.promise(() => fetch(`${daemon.endpoint}/traces`));
 			const webRootBody = yield* Effect.promise(() => webRoot.text());
 			const webDeepLink = yield* Effect.promise(() => fetch(`${daemon.endpoint}/traces/${traceId}`));
@@ -511,7 +519,16 @@ const result = await Effect.runPromise(
 			};
 		}),
 	),
-);
+).finally(() => {
+	for (const directory of [
+		stateDirectory,
+		degradedStateDirectory,
+		failedWriterStateDirectory,
+		slowQueryStateDirectory,
+	]) {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
 
 console.log(`BELFRY_TEST_RESULT=${JSON.stringify(result)}`);
 
