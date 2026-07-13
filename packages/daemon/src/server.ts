@@ -9,7 +9,7 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { makeQueryApiLayer } from "./query-handlers.js";
 import { IsolatedTelemetryQuery } from "./query-transport.js";
 import { runRetentionUntilCurrent } from "./retention-schedule.js";
-import { localOnlyNetworkBoundary, makeOtlpRoutes, makeWebRoutes } from "./routes.js";
+import { makeDaemonRequestBoundary, makeOtlpRoutes, makeWebRoutes } from "./routes.js";
 
 export type DaemonServerOptions = {
 	readonly configuration: BelfryConfiguration;
@@ -31,6 +31,8 @@ export class DaemonStartFailure extends Schema.TaggedErrorClass<DaemonStartFailu
 	code: Schema.Literals(["state_unavailable", "writer_unavailable", "reader_unavailable", "listen_failed"]),
 	message: Schema.String,
 }) {}
+
+const queryBodyLimitBytes = 1_048_576;
 
 const buildScopedLayer = <A, E, R>(
 	layer: Layer.Layer<A, E, R>,
@@ -138,7 +140,7 @@ export const startDaemonServer = (
 			);
 		}
 		const routes = Layer.mergeAll(
-			localOnlyNetworkBoundary,
+			makeDaemonRequestBoundary(queryBodyLimitBytes),
 			makeQueryApiLayer({
 				reader,
 				admission,
@@ -169,7 +171,7 @@ export const startDaemonServer = (
 				BunHttpServer.layer({
 					hostname: config.daemon.host,
 					port: config.daemon.port,
-					maxRequestBodySize: Math.max(1_048_576, config.ingestion.maxCompressedBytes),
+					maxRequestBodySize: Math.max(queryBodyLimitBytes, config.ingestion.maxCompressedBytes),
 					gracefulShutdownTimeout: config.daemon.shutdownTimeoutMs,
 				}),
 			),

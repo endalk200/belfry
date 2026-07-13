@@ -19,25 +19,99 @@ import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import {
 	HttpServerRequest as CurrentHttpServerRequest,
 	type HttpServerRequest,
+	fromWeb as httpServerRequestFromWeb,
 } from "effect/unstable/http/HttpServerRequest";
 
-export const localOnlyNetworkBoundary = HttpRouter.middleware(
-	(httpEffect) =>
-		Effect.flatMap(CurrentHttpServerRequest, (request) => {
-			const host = request.headers.host;
-			const origin = request.headers.origin;
-			if (!isLoopbackHostHeader(host) || (origin !== undefined && !isLoopbackOrigin(origin))) {
-				return Effect.succeed(
-					HttpServerResponse.text("Belfry only accepts requests from this machine.", {
-						status: 403,
-						headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+class QueryRequestBodyTooLarge extends Error {}
+
+export const makeDaemonRequestBoundary = (queryBodyLimitBytes: number) =>
+	HttpRouter.middleware(
+		(httpEffect) =>
+			Effect.flatMap(CurrentHttpServerRequest, (request) => {
+				const host = request.headers.host;
+				const origin = request.headers.origin;
+				if (!isLoopbackHostHeader(host) || (origin !== undefined && !isLoopbackOrigin(origin))) {
+					return Effect.succeed(
+						HttpServerResponse.text("Belfry only accepts requests from this machine.", {
+							status: 403,
+							headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+						}),
+					);
+				}
+				if (!isQueryApiPost(request)) return httpEffect;
+				const source = request.source;
+				if (!(source instanceof Request)) return Effect.succeed(queryBodyReadFailureResponse);
+
+				const declaredLength = Number(request.headers["content-length"] ?? "0");
+				if (Number.isFinite(declaredLength) && declaredLength > queryBodyLimitBytes) {
+					return Effect.succeed(queryBodyLimitResponse(queryBodyLimitBytes));
+				}
+
+				return readQueryRequestBody(request, queryBodyLimitBytes).pipe(
+					Effect.result,
+					Effect.flatMap((result) => {
+						if (result._tag === "Failure") {
+							return Effect.succeed(
+								result.failure instanceof QueryRequestBodyTooLarge
+									? queryBodyLimitResponse(queryBodyLimitBytes)
+									: queryBodyReadFailureResponse,
+							);
+						}
+
+						const replayedRequest = httpServerRequestFromWeb(
+							new Request(source.url, {
+								method: source.method,
+								headers: source.headers,
+								body: result.success.buffer as ArrayBuffer,
+								signal: source.signal,
+							}),
+						);
+						return httpEffect.pipe(Effect.provideService(CurrentHttpServerRequest, replayedRequest));
 					}),
 				);
+			}),
+		{ global: true },
+	);
+
+const isQueryApiPost = (request: HttpServerRequest): boolean =>
+	request.method === "POST" && new URL(request.url, "http://127.0.0.1").pathname.startsWith("/api/");
+
+const queryBodyLimitResponse = (limitBytes: number) =>
+	HttpServerResponse.text(`The Query API request body exceeds Belfry's ${limitBytes}-byte limit.`, {
+		status: 413,
+		headers: {
+			"cache-control": "no-store",
+			connection: "close",
+			"x-content-type-options": "nosniff",
+		},
+	});
+
+const queryBodyReadFailureResponse = HttpServerResponse.text("The Query API request body could not be read.", {
+	status: 400,
+	headers: {
+		"cache-control": "no-store",
+		connection: "close",
+		"x-content-type-options": "nosniff",
+	},
+});
+
+const readQueryRequestBody = (request: HttpServerRequest, limitBytes: number): Effect.Effect<Uint8Array, unknown> => {
+	if (request.headers["content-length"] === "0") return Effect.succeed(new Uint8Array());
+	return Stream.runFoldEffect(
+		request.stream,
+		(): BodyAccumulator => ({ chunks: [], bytes: 0 }),
+		(accumulator, chunk) => {
+			const bytes = accumulator.bytes + chunk.byteLength;
+			if (bytes > limitBytes) {
+				return Effect.fail(
+					new QueryRequestBodyTooLarge(`The Query API request body exceeds the ${limitBytes}-byte limit.`),
+				);
 			}
-			return httpEffect;
-		}),
-	{ global: true },
-);
+			accumulator.chunks.push(chunk);
+			return Effect.succeed({ chunks: accumulator.chunks, bytes });
+		},
+	).pipe(Effect.map(({ bytes, chunks }) => concatenateBytes(chunks, bytes)));
+};
 
 export const makeOtlpRoutes = (admission: IngestionAdmissionService, maxCompressedBytes: number) =>
 	HttpRouter.addAll([
