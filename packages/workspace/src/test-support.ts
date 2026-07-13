@@ -137,7 +137,7 @@ const logDetail: LogDetail = {
 const traceDetail: TraceDetail = {
 	...traceSummary,
 	spans: [rootSpan, childSpan],
-	logs: [logSummary],
+	spansTruncated: false,
 };
 
 const serviceSummary: ServiceSummary = {

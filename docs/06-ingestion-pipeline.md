@@ -1,6 +1,6 @@
 # Ingestion Pipeline
 
-## Durable request flow
+## Committed request flow
 
 ```text
 HTTP route
@@ -16,8 +16,9 @@ HTTP route
 ```
 
 Capacity is released after the worker completes, including all error paths. An
-HTTP success therefore means durable commit, not acceptance into volatile
-memory.
+HTTP success therefore means the local SQLite transaction committed, not
+acceptance into volatile memory. See the `synchronous=NORMAL` power-loss caveat
+in [SQLite storage](05-sqlite-storage-design.md).
 
 ## Bounds
 
@@ -29,6 +30,7 @@ Default limits are:
 | Decompressed request | 32 MiB |
 | Queued requests | 64 |
 | Queued compressed bytes | 64 MiB |
+| Writer response timeout | 30 seconds |
 | Shutdown drain | 10 seconds |
 
 The queue reserves both request count and one full compressed-request allowance
@@ -40,10 +42,10 @@ Saturation produces `429`; shutdown or unavailable storage produces `503`.
 Oversize, unsupported, and malformed requests produce the protocol statuses
 documented in [OTLP compatibility](03-opentelemetry-protocol.md).
 
-Rejection accounting uses a separate dropping queue capped at the configured
-request capacity. It waits for already-admitted telemetry before sending a
-diagnostic command to the worker, so an unsupported-request flood cannot grow
-the worker RPC map without bound or starve durable ingest.
+Rejection accounting uses a separate best-effort dropping queue capped at the
+configured request capacity. Error responses do not wait for diagnostic I/O;
+the queue serializes persistence behind admitted telemetry without growing the
+worker RPC map or starving accepted ingest.
 
 ## Decode and normalization
 

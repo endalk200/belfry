@@ -98,13 +98,13 @@ export const anyValueText = (value: OtlpAnyValue): string => {
 };
 
 export const encodeJson = <A, I>(schema: Schema.Codec<A, I>, value: A): string =>
-	stableStringify(Schema.encodeSync(schema)(value));
+	stableStringify(Schema.encodeSync(Schema.toCodecJson(schema))(value));
 
 export const encodeDetailJson = <A, I>(schema: Schema.Codec<A, I>, value: A): string =>
-	JSON.stringify(Schema.encodeSync(schema)(value));
+	JSON.stringify(Schema.encodeSync(Schema.toCodecJson(schema))(value));
 
 export const decodeJson = <A, I>(schema: Schema.Codec<A, I>, json: string): A =>
-	Schema.decodeUnknownSync(schema)(JSON.parse(json));
+	Schema.decodeUnknownSync(Schema.toCodecJson(schema))(JSON.parse(json));
 
 const stableStringify = (value: unknown): string => {
 	if (value === null || typeof value !== "object") return JSON.stringify(value);

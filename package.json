@@ -9,20 +9,19 @@
 		"dev": "bun run belfry --",
 		"dev:watch": "turbo watch build",
 		"build": "turbo run build",
-		"lint": "turbo run lint && biome check package.json scripts/benchmark-workbench.ts scripts/otel-sdk-fixture.ts scripts/tsconfig.json",
-		"lint:fix": "turbo run lint:fix && biome check --fix package.json scripts/benchmark-workbench.ts scripts/otel-sdk-fixture.ts scripts/tsconfig.json",
+		"lint": "turbo run lint",
+		"lint:fix": "turbo run lint:fix",
 		"test": "turbo run test",
-		"format": "turbo run format && biome format --write package.json scripts/benchmark-workbench.ts scripts/otel-sdk-fixture.ts scripts/tsconfig.json",
-		"format:check": "turbo run format:check && biome format package.json scripts/benchmark-workbench.ts scripts/otel-sdk-fixture.ts scripts/tsconfig.json",
-		"check-types": "turbo run check-types && tsc -p scripts/tsconfig.json --noEmit",
+		"format": "turbo run format",
+		"format:check": "turbo run format:check",
+		"check-types": "turbo run check-types",
 		"cli": "bun run apps/cli/src/bin.ts --",
 		"release:audit": "bun run scripts/audit-release.ts",
 		"release:smoke": "bun run scripts/smoke-npm-package.ts",
 		"release:verify": "bun run scripts/verify-npm-package.ts",
 		"belfry": "bun run apps/cli/src/bin.ts --",
 		"sync-cli-version": "bun run scripts/sync-cli-version.ts",
-		"version-packages": "changeset version && bun run sync-cli-version",
-		"devtools": "devtools"
+		"version-packages": "changeset version && bun run sync-cli-version"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.2",
@@ -54,7 +53,6 @@
 	"workspaces": [
 		"apps/*",
 		"packages/*",
-		"packages/agents/*",
-		"packages/tools/*"
+		"scripts"
 	]
 }

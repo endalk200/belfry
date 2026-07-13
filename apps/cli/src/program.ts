@@ -6,11 +6,12 @@ import { Effect, Layer } from "effect";
 import { runCli } from "./cli/run.js";
 import { handleCliFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
 import { telemetryLayer } from "./runtime/telemetry.js";
+import { VERSION } from "./version.js";
 
 const BelfryConfigLayer = BelfryConfig.layer;
 const DaemonManagerLayer = Layer.effect(
 	DaemonManager,
-	Effect.map(BelfryConfig, (configuration) => makeDaemonManager({ configuration })),
+	Effect.map(BelfryConfig, (configuration) => makeDaemonManager({ configuration, serviceVersion: VERSION })),
 ).pipe(Layer.provide(BelfryConfigLayer));
 const TelemetryLayer = telemetryLayer.pipe(Layer.provide(BelfryConfigLayer));
 const MainLayer = Layer.mergeAll(BelfryConfigLayer, DaemonManagerLayer, TelemetryLayer).pipe(

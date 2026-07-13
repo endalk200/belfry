@@ -21,13 +21,16 @@ Telemetry configuration is represented as:
 ```toml
 [telemetry]
 enabled = false
-otlp_endpoint = "http://localhost:4318"
+otlp_endpoint = "http://127.0.0.1:4318"
 ```
 
 Environment overrides preserve the existing telemetry contract:
 `BELFRY_TELEMETRY` accepts only `true` or `false`, and `BELFRY_OTLP_ENDPOINT`
 must be an absolute URL. This keeps the opt-in telemetry decision from
 0002 intact while allowing persistent user configuration.
+
+The default endpoint uses the explicit IPv4 loopback address `127.0.0.1`; a
+configured endpoint must likewise use a loopback host.
 
 The shared package exports both Effect `Config` descriptors and a resolved
 `BelfryConfig` service/layer. Descriptors support validation and tooling, while

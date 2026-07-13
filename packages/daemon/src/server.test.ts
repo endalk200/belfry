@@ -21,10 +21,11 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.strictEqual(result.needsMore, false);
 	});
 
-	it("serves health, durable OTLP, bounded queries, and OpenAPI on loopback", () => {
+	it("serves health, committed OTLP, bounded queries, and OpenAPI on loopback", () => {
 		const result = runHarness();
 
 		assert.strictEqual(result.host, "127.0.0.1");
+		assert.strictEqual(result.cursorSecretBytes, 32);
 		assert.strictEqual(result.webStatus, 200);
 		assert.strictEqual(result.webHasWorkbench, true);
 		assert.strictEqual(result.webHasInterfacePreferences, true);
@@ -35,10 +36,14 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.strictEqual(result.healthStatus, 200);
 		assert.strictEqual(result.healthLive, true);
 		assert.strictEqual(result.otlpStatus, 200);
-		assert.strictEqual(result.otlpCorsOrigin, "*");
+		assert.strictEqual(result.otlpCorsOrigin, "http://127.0.0.1:3000");
 		assert.strictEqual(result.otlpPreflightStatus, 204);
+		assert.strictEqual(result.otlpPreflightOrigin, "http://127.0.0.1:3000");
 		assert.match(String(result.otlpPreflightMethods), /POST/u);
 		assert.match(String(result.otlpPreflightHeaders), /content-encoding/u);
+		assert.strictEqual(result.foreignOriginStatus, 403);
+		assert.strictEqual(result.foreignOriginCors, null);
+		assert.strictEqual(result.foreignHostStatus, 403);
 		assert.strictEqual(result.logOtlpStatus, 200);
 		assert.strictEqual(result.otlpBody, "{}");
 		assert.strictEqual(result.traceCount, 1);
@@ -59,13 +64,15 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.strictEqual(result.otherSpanTraceLogCount, 0);
 		assert.strictEqual(result.configuredLimitStatus, 400);
 		assert.strictEqual(result.configuredLookbackStatus, 400);
+		assert.strictEqual(result.oversizedQueryStatus, 413);
+		assert.strictEqual(result.chunkedOversizedQueryStatus, 413);
 		assert.strictEqual(result.invertedServicesRangeStatus, 400);
 		assert.strictEqual(result.malformedStatus, 400);
-		assert.strictEqual(result.malformedCorsOrigin, "*");
+		assert.strictEqual(result.malformedCorsOrigin, null);
 		assert.strictEqual(result.unsupportedStatus, 415);
-		assert.strictEqual(result.unsupportedCorsOrigin, "*");
+		assert.strictEqual(result.unsupportedCorsOrigin, null);
 		assert.strictEqual(result.oversizedStatus, 413);
-		assert.strictEqual(result.oversizedCorsOrigin, "*");
+		assert.strictEqual(result.oversizedCorsOrigin, null);
 		assert.strictEqual(result.chunkedOversizedStatus, 413);
 		assert.strictEqual(result.rejectedRequests, "4");
 		assert.strictEqual(result.decodeErrors, "1");
@@ -106,8 +113,8 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.isBelow(Number(result.slowQueryDurationMs), 750);
 		assert.strictEqual(result.responsiveHealthStatus, 200);
 		assert.isBelow(Number(result.responsiveHealthDurationMs), 250);
-		assert.strictEqual(result.restartedQueryStatus, 503);
-		assert.strictEqual(result.restartedQueryCode, "query_timeout");
+		assert.strictEqual(result.restartedQueryStatus, 200);
+		assert.strictEqual(result.restartedQueryCount, 0);
 	});
 });
 

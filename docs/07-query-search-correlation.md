@@ -12,11 +12,13 @@ and unsupported combinations return typed errors rather than reaching SQL.
 Trace search supports participating Service identities, operation text, status,
 duration bounds, trace ID, general FTS text, scalar attribute filters, and
 `newest`, `oldest`, or `slowest` ordering. A trace matches a selected Service
-when any span participates; opening it still shows every span and Service.
+when any span participates; opening it retains cross-Service identity even when
+the bounded span detail is truncated.
 
-Trace detail returns a materialized summary, structurally ordered complete
-spans, warnings, and correlated log summaries. Span detail remains available as
-a dedicated endpoint.
+Trace detail returns a materialized summary and up to the configured result
+ceiling of structurally ordered spans. It marks truncation explicitly. Complete
+individual span detail remains available as a dedicated endpoint, and
+correlated logs use their own bounded cursor pagination.
 
 ## Log search
 
@@ -40,7 +42,7 @@ applied bounds, truncation, and a next cursor when another page exists.
 ## Correlation
 
 - Trace or span to logs applies the exact trace ID and optional span ID.
-- Log to trace opens the complete trace and focuses the correlated span when
+- Log to trace opens the bounded trace detail and focuses the correlated span when
   present.
 - Trace membership includes every participating Service rather than only root
   ownership.

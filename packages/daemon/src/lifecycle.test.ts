@@ -41,6 +41,14 @@ describe("machine-wide Daemon lifecycle", () => {
 			assert.strictEqual(first.state, "running");
 			assert.strictEqual(first.endpoint, `http://127.0.0.1:${port}`);
 
+			writeFileSync(join(stateDirectory, "daemon.json"), "{corrupt registry");
+			const recoveredStatus = runCli(["daemon", "status", "--json"], env);
+			assert.strictEqual(recoveredStatus.state, "running");
+			assert.strictEqual(recoveredStatus.pid, first.pid);
+			const recoveredStart = runCli(["daemon", "start", "--json"], env);
+			assert.strictEqual(recoveredStart.adopted, true);
+			assert.strictEqual(recoveredStart.pid, first.pid);
+
 			const adopted = runCli(["daemon", "start", "--json"], env);
 			assert.strictEqual(adopted.adopted, true);
 			assert.strictEqual(adopted.pid, first.pid);

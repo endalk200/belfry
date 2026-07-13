@@ -5,7 +5,7 @@
 		"declarationMap": false,
 		"jsx": "react-jsx",
 		"noEmit": true,
-		"types": ["react", "react-dom/client", "vite/client"]
+		"types": ["node", "react", "react-dom/client", "vite/client"]
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
 	"exclude": ["dist", "node_modules"]

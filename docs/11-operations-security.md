@@ -4,7 +4,10 @@
 
 Belfry accepts only loopback hosts and has no remote-binding mode. The default
 listener is `127.0.0.1:4318`; authentication is intentionally omitted inside
-that local boundary. The Daemon does not upload telemetry.
+that local boundary. The Daemon additionally requires a loopback HTTP `Host`
+and rejects browser `Origin` values that are not loopback HTTP(S) origins. The
+Daemon does not upload telemetry and is not intended to sit behind a proxy or be
+deployed.
 
 Local telemetry is still sensitive. It may contain credentials, cookies,
 personal data, source, SQL, prompts, and request bodies. Belfry does not promise
@@ -51,6 +54,10 @@ The `[interfaces]` settings are authoritative for `refresh_interval_ms`,
 configured range/cadence, while `belfry web --no-open` remains an explicit
 one-run override.
 
+Unknown TOML sections and keys are rejected, with a nearest-key suggestion when
+available. State directories are forced to mode `0700` and the database,
+registry, lock, and cursor-secret files to `0600` on POSIX systems.
+
 All operational safety limits are regular TOML keys and are checked by
 `belfry config validate` before the Daemon starts:
 
@@ -66,6 +73,7 @@ All operational safety limits are regular TOML keys and are checked by
 | `ingestion` | `max_compressed_bytes`, `max_decompressed_bytes` | positive safe integers; decompressed ≥ compressed |
 | `ingestion` | `queue_request_capacity` | 1–65,536 requests |
 | `ingestion` | `queue_byte_capacity` | at least one maximum compressed request |
+| `ingestion` | `writer_timeout_ms` | whole milliseconds, 100–3,600,000 |
 | `ingestion` | `drain_timeout_ms` | whole milliseconds, 1–3,600,000 |
 | `query` | `max_lookback_days` | positive |
 | `query` | `max_results` | 100–500; the lower bound keeps the documented UI and Debugging Skill page sizes valid |
@@ -81,21 +89,22 @@ effective limits are discoverable without consulting source code.
 ```sh
 belfry database path
 belfry database stats --json
-belfry database status
 belfry database checkpoint
 belfry database vacuum
 belfry database reset --yes
 ```
 
 Checkpoint, vacuum, and reset require the verified Daemon to be stopped. Reset
-requires `--yes`. Default retention is seven days or one GiB, applied in bounded
-oldest-first batches.
+requires `--yes`, uses secure deletion, checkpoints, and vacuums to reclaim
+space. Default retention is seven days or one GiB of live SQLite pages, applied
+in bounded oldest-first batches.
 
 ## Health and troubleshooting
 
 `/api/health` reports `live`, `migrationReady`, `writerReady`,
-`readsAvailable`, queue depth/bytes, database size, and Daemon identity.
-`/api/ingestion/stats` reports durable counts, write latency, retention, and
+`readsAvailable`, queue depth/bytes, live database size, total Store-file size,
+WAL size, and Daemon identity.
+`/api/ingestion/stats` reports committed counts, write latency, retention, and
 drops. `/api/ingestion/diagnostics` records actionable rejection and retention
 codes. A runtime writer/retention failure pauses new ingest and changes health
 to degraded without disabling safe read-only inspection; restart retries a
@@ -105,14 +114,19 @@ On shutdown, Belfry stops accepting work and drains already accepted requests
 for up to ten seconds. A forced termination can leave WAL content, which SQLite
 recovers on the next verified startup.
 
+SQLite uses WAL with `synchronous=NORMAL`. Committed writes survive an ordinary
+process crash, but the latest transaction can be lost after an operating-system
+crash or power loss. This is an explicit responsiveness tradeoff for local
+debugging, not a production durability promise.
+
 ## Threat controls
 
 | Threat | Control |
 | --- | --- |
-| Network exposure | Loopback-only validated host |
+| Network exposure / DNS rebinding | Loopback bind plus validated `Host` and browser `Origin` |
 | Wrong-process termination | Lock, registry, PID start identity, nonce, health verification |
 | Disk exhaustion | Age/size retention, bounded requests, explicit reset/vacuum |
 | Memory exhaustion | Request-count and byte queue capacity, decompression limit |
 | Query abuse | Required bounded range/limit, typed filters, timeout, no raw SQL |
 | Secret discovery through indexes | Sensitive-key projection deny pattern |
-| Crash corruption | WAL, one writer, short transactions, durable acknowledgement |
+| Process crash corruption | WAL, one writer, short transactions, committed acknowledgement |

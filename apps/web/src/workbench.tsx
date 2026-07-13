@@ -53,7 +53,9 @@ export function TelemetryWorkbench({
 	const logsRef = useRef<ReadonlyArray<LogSummary>>([]);
 	const refreshGenerationRef = useRef(0);
 	const [services, setServices] = useState<ReadonlyArray<ServiceSummary>>([]);
+	const servicesCacheRef = useRef({ rangeKey: "", fetchedAt: 0 });
 	const [traceDetail, setTraceDetail] = useState<TraceDetail>();
+	const [traceLogs, setTraceLogs] = useState<ReadonlyArray<LogSummary>>([]);
 	const [logDetail, setLogDetail] = useState<LogDetail>();
 	const [phase, setPhase] = useState<WorkbenchPhase>("loading");
 	const [notice, setNotice] = useState("");
@@ -97,14 +99,19 @@ export function TelemetryWorkbench({
 	}, [queryMaxLookbackMinutes, restoreFallback]);
 
 	useEffect(() => {
+		const installDataSource = (connected: WebWorkspaceDataSource) => {
+			servicesCacheRef.current = { rangeKey: "", fetchedAt: 0 };
+			setServices([]);
+			setDataSource(connected);
+		};
 		if (providedDataSource !== undefined) {
-			setDataSource(providedDataSource);
+			installDataSource(providedDataSource);
 			return;
 		}
 		let cancelled = false;
 		void connectWebWorkspace(endpoint, queryMaxResults)
 			.then((connected) => {
-				if (!cancelled) setDataSource(connected);
+				if (!cancelled) installDataSource(connected);
 			})
 			.catch(() => {
 				if (cancelled) return;
@@ -116,16 +123,26 @@ export function TelemetryWorkbench({
 	}, [endpoint, providedDataSource, queryMaxResults]);
 
 	const traceDetailGenerationRef = useRef(0);
+	const traceDetailAbortRef = useRef<AbortController | null>(null);
+	const traceDetailRefreshedAtRef = useRef(0);
 	const loadTraceDetail = useCallback(
 		async (traceId: string, mode: "initial" | "refresh"): Promise<void> => {
 			if (dataSource === undefined) return;
 			const generation = traceDetailGenerationRef.current + 1;
 			traceDetailGenerationRef.current = generation;
+			traceDetailAbortRef.current?.abort();
+			const controller = new AbortController();
+			traceDetailAbortRef.current = controller;
 			try {
-				const detail = await dataSource.getTrace(traceId);
+				const [detail, correlatedLogs] = await Promise.all([
+					dataSource.getTrace(traceId, { signal: controller.signal }),
+					dataSource.listCorrelatedLogs(traceId, undefined, { signal: controller.signal }),
+				]);
 				if (generation !== traceDetailGenerationRef.current || workspaceRef.current.selectedTraceId !== traceId)
 					return;
+				traceDetailRefreshedAtRef.current = Date.now();
 				setTraceDetail(detail);
+				setTraceLogs(correlatedLogs.items);
 				const latest = workspaceRef.current;
 				const reconciled = transitionWorkspace(latest, {
 					type: "trace-detail-loaded",
@@ -134,41 +151,72 @@ export function TelemetryWorkbench({
 				});
 				if (reconciled !== latest) commitState(reconciled, "replace");
 			} catch (error) {
+				if (controller.signal.aborted) return;
 				// Background refreshes fail quietly; the loaded detail stays useful.
 				if (mode === "initial" && workspaceRef.current.selectedTraceId === traceId)
 					setNotice(presentWorkspaceError(error).message);
+			} finally {
+				if (traceDetailAbortRef.current === controller) traceDetailAbortRef.current = null;
 			}
 		},
 		[commitState, dataSource],
 	);
 
+	const refreshAbortRef = useRef<AbortController | null>(null);
 	const refresh = useCallback(async () => {
 		if (dataSource === undefined) return;
+		refreshAbortRef.current?.abort();
+		const controller = new AbortController();
+		refreshAbortRef.current = controller;
 		const generation = refreshGenerationRef.current + 1;
 		refreshGenerationRef.current = generation;
 		setPhase((current) => (current === "ready" || current === "stale" ? current : "reconnecting"));
 		const current = workspaceRef.current;
 		const revision = workspaceQueryRevision(current);
 		const query = current.signal === "traces" ? current.traceQuery : current.logQuery;
+		const rangeKey = current.refreshPaused
+			? `${query.fromNs.toString()}:${query.toNs.toString()}`
+			: (query.toNs - query.fromNs).toString();
+		const servicesCache = servicesCacheRef.current;
+		const shouldRefreshServices =
+			servicesCache.rangeKey !== rangeKey || Date.now() - servicesCache.fetchedAt >= 10_000;
 		try {
 			const [servicePage, resultPage] = await Promise.all([
-				dataSource.listServices(query.fromNs, query.toNs),
+				shouldRefreshServices
+					? dataSource.listServices(query.fromNs, query.toNs, { signal: controller.signal })
+					: Promise.resolve(undefined),
 				current.signal === "traces"
-					? dataSource.searchTraces(current.traceQuery)
+					? dataSource.searchTraces(current.traceQuery, { signal: controller.signal })
 					: current.logCorrelation === undefined
-						? dataSource.searchLogs(current.logQuery)
-						: dataSource.listCorrelatedLogs(current.logCorrelation.traceId, current.logCorrelation.spanId),
+						? dataSource.searchLogs(current.logQuery, { signal: controller.signal })
+						: dataSource.listCorrelatedLogs(current.logCorrelation.traceId, current.logCorrelation.spanId, {
+								signal: controller.signal,
+							}),
 			]);
 			if (
 				generation !== refreshGenerationRef.current ||
 				workspaceQueryRevision(workspaceRef.current) !== revision
 			)
 				return;
-			setServices(servicePage.items);
+			if (servicePage !== undefined) {
+				setServices(servicePage.items);
+				servicesCacheRef.current = { rangeKey, fetchedAt: Date.now() };
+			}
 			if (current.signal === "traces") {
+				const previousTraces = tracesRef.current;
 				const nextTraces = resultPage.items as ReadonlyArray<TraceSummary>;
 				tracesRef.current = nextTraces;
 				setTraces(nextTraces);
+				const selectedTraceId = workspaceRef.current.selectedTraceId;
+				if (
+					selectedTraceId !== undefined &&
+					traceDetailAbortRef.current === null &&
+					(traceSummaryRevision(previousTraces, selectedTraceId) !==
+						traceSummaryRevision(nextTraces, selectedTraceId) ||
+						Date.now() - traceDetailRefreshedAtRef.current >= 10_000)
+				) {
+					void loadTraceDetail(selectedTraceId, "refresh");
+				}
 			} else {
 				const nextLogs = resultPage.items as ReadonlyArray<LogSummary>;
 				logsRef.current = nextLogs;
@@ -183,10 +231,8 @@ export function TelemetryWorkbench({
 			});
 			if (refreshed !== latest) commitState(refreshed, "replace");
 			setPhase("ready");
-			// Keep an open trace detail in sync with late-arriving spans and logs.
-			const selectedTraceId = workspaceRef.current.selectedTraceId;
-			if (selectedTraceId !== undefined) void loadTraceDetail(selectedTraceId, "refresh");
 		} catch (error) {
+			if (controller.signal.aborted) return;
 			if (
 				generation !== refreshGenerationRef.current ||
 				workspaceQueryRevision(workspaceRef.current) !== revision
@@ -226,41 +272,61 @@ export function TelemetryWorkbench({
 	useEffect(() => {
 		const traceId = workspace.selectedTraceId;
 		if (traceId === undefined || dataSource === undefined) {
+			traceDetailAbortRef.current?.abort();
 			setTraceDetail(undefined);
+			setTraceLogs([]);
 			return;
 		}
 		setTraceDetail((current) => (current?.traceId === traceId ? current : undefined));
+		traceDetailRefreshedAtRef.current = 0;
 		void loadTraceDetail(traceId, "initial");
 	}, [dataSource, loadTraceDetail, workspace.selectedTraceId]);
 
+	const logDetailAbortRef = useRef<AbortController | null>(null);
 	useEffect(() => {
 		const logId = workspace.selectedLogId;
 		if (logId === undefined || dataSource === undefined) {
+			logDetailAbortRef.current?.abort();
 			setLogDetail(undefined);
 			return;
 		}
-		let cancelled = false;
+		logDetailAbortRef.current?.abort();
+		const controller = new AbortController();
+		logDetailAbortRef.current = controller;
 		setLogDetail((current) => (current?.id === logId ? current : undefined));
 		void dataSource
-			.getLog(logId)
+			.getLog(logId, { signal: controller.signal })
 			.then((detail) => {
-				if (!cancelled) setLogDetail(detail);
+				if (!controller.signal.aborted) setLogDetail(detail);
 			})
 			.catch((error) => {
-				if (!cancelled) setNotice(presentWorkspaceError(error).message);
+				if (!controller.signal.aborted) setNotice(presentWorkspaceError(error).message);
 			});
 		return () => {
-			cancelled = true;
+			controller.abort();
 		};
 	}, [dataSource, workspace.selectedLogId]);
+
+	useEffect(
+		() => () => {
+			refreshAbortRef.current?.abort();
+			traceDetailAbortRef.current?.abort();
+			logDetailAbortRef.current?.abort();
+		},
+		[],
+	);
 
 	useEffect(() => {
 		const handleShortcut = (event: KeyboardEvent) => {
 			const target = event.target;
 			if (
+				event.metaKey ||
+				event.ctrlKey ||
+				event.altKey ||
 				target instanceof HTMLInputElement ||
 				target instanceof HTMLSelectElement ||
-				target instanceof HTMLTextAreaElement
+				target instanceof HTMLTextAreaElement ||
+				(target instanceof HTMLElement && target.isContentEditable)
 			)
 				return;
 			if (event.key === "/") {
@@ -386,6 +452,7 @@ export function TelemetryWorkbench({
 						) : (
 							<TraceDetailView
 								trace={traceDetail}
+								logs={traceLogs}
 								workspace={workspace}
 								onAction={dispatchWorkspaceAction}
 								onOpenLog={selectLog}
@@ -448,3 +515,10 @@ const workspaceQueryRevision = (workspace: WorkspaceState): string =>
 		},
 		(_key, value) => (typeof value === "bigint" ? value.toString() : value),
 	);
+
+const traceSummaryRevision = (items: ReadonlyArray<TraceSummary>, traceId: string): string => {
+	const trace = items.find((item) => item.traceId === traceId);
+	return trace === undefined
+		? "missing"
+		: JSON.stringify(trace, (_key, value) => (typeof value === "bigint" ? value.toString() : value));
+};

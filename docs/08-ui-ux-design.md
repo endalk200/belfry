@@ -19,15 +19,16 @@ The React/Vite interface provides:
 - traces and logs as primary tabs;
 - multi-Service filtering with namespace/name/environment identity;
 - text, status, severity, duration, trace/span ID, and scalar-attribute filters;
-- complete trace, span, and log detail;
+- bounded trace waterfalls plus complete selected span and log detail;
 - a collapsible, zoomable, virtualized waterfall for large traces;
 - span Attributes, Events, Links, Resource, and Scope tabs;
 - trace-to-log, span-to-log, and log-to-trace navigation;
 - pause, manual refresh, responsive layouts, and keyboard shortcuts;
 - URL serialization for filters, range, sort, selection, and pause state.
 
-Only visible waterfall/list windows plus overscan are rendered. A 1,000-span
-trace therefore remains interactive without creating 1,000 DOM rows.
+Only visible waterfall/list windows plus overscan are rendered. Trace detail is
+also capped by the configured query-result ceiling (at most 500 spans) and shows
+an explicit truncation warning rather than creating an unbounded response.
 
 ## Data and error states
 

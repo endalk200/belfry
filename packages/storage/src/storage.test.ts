@@ -32,6 +32,34 @@ describe("Telemetry Storage", () => {
 		assert.deepStrictEqual(result.attributeValueFacets, [{ value: "true", count: 1 }]);
 	});
 
+	it("round-trips non-finite OTLP doubles without corrupting stored details", () => {
+		const result = runHarness("non-finite-values");
+
+		assert.deepStrictEqual(result.spanValues, ["NaN", "Infinity", "-Infinity"]);
+		assert.deepStrictEqual(result.logValues, ["NaN", "Infinity", "-Infinity"]);
+	});
+
+	it("bounds trace details while keeping direct span lookup available", () => {
+		const result = runHarness("bounded-trace-detail");
+
+		assert.strictEqual(result.spanCount, 3);
+		assert.strictEqual(result.returnedSpanCount, 2);
+		assert.strictEqual(result.spansTruncated, true);
+		assert.strictEqual(result.directSpanId, "0000000000000003");
+		assert.strictEqual(result.directSpanDepth, 2);
+	});
+
+	it("resets telemetry, reclaims file space, and keeps local state private", () => {
+		const result = runHarness("maintenance-reset");
+
+		assert.isAbove(Number(result.beforeStorageSizeBytes), Number(result.afterStorageSizeBytes));
+		assert.isAbove(Number(result.beforeLiveDataSizeBytes), Number(result.afterLiveDataSizeBytes));
+		assert.strictEqual(result.afterLogCount, 0);
+		assert.strictEqual(result.acceptedLogRecords, "0");
+		assert.strictEqual(result.databaseMode, "600");
+		assert.strictEqual(result.directoryMode, "700");
+	});
+
 	it("deletes oldest telemetry and its search projections in bounded retention", () => {
 		const result = runHarness("retention-cleanup");
 

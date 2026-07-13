@@ -14,15 +14,14 @@
 		"format": "biome format --write package.json tsconfig.json README.md",
 		"format:check": "biome format package.json tsconfig.json README.md",
 		"lint": "biome check package.json tsconfig.json README.md",
-		"lint:fix": "biome check --fix package.json tsconfig.json README.md",
-		"test": "vitest run --passWithNoTests"
+		"lint:fix": "biome check --fix package.json tsconfig.json README.md"
 	},
 	"dependencies": {
 		"protobufjs": "^8.7.0"
 	},
 	"devDependencies": {
 		"@belfry/typescript-config": "workspace:*",
-		"typescript": "6.0.3",
-		"vitest": "^4.1.10"
+		"protobufjs-cli": "^2.6.0",
+		"typescript": "6.0.3"
 	}
 }

@@ -1,0 +1,17 @@
+{
+	"name": "@belfry/repository-scripts",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"check-types": "tsc -p tsconfig.json --noEmit",
+		"format": "biome format --write package.json tsconfig.json *.ts ../package.json ../turbo.json ../biome.json ../README.md ../SECURITY.md ../CONTEXT.md ../.changeset ../docs",
+		"format:check": "biome format package.json tsconfig.json *.ts ../package.json ../turbo.json ../biome.json ../README.md ../SECURITY.md ../CONTEXT.md ../.changeset ../docs",
+		"lint": "biome check package.json tsconfig.json *.ts ../package.json ../turbo.json ../biome.json ../README.md ../SECURITY.md ../CONTEXT.md ../.changeset ../docs",
+		"lint:fix": "biome check --fix package.json tsconfig.json *.ts ../package.json ../turbo.json ../biome.json ../README.md ../SECURITY.md ../CONTEXT.md ../.changeset ../docs"
+	},
+	"devDependencies": {
+		"@belfry/typescript-config": "workspace:*",
+		"@types/bun": "^1.3.14",
+		"typescript": "6.0.3"
+	}
+}

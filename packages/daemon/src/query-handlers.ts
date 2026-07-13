@@ -90,6 +90,8 @@ export const makeQueryApiLayer = (options: QueryHandlersOptions) => {
 						queueDepth: queue.queueDepth,
 						queueBytes: BigInt(queue.queueBytes),
 						databaseSizeBytes: 0n,
+						storageSizeBytes: 0n,
+						walSizeBytes: 0n,
 						message:
 							queryFailure ??
 							writerFailure ??

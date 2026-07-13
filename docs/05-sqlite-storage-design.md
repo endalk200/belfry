@@ -6,6 +6,11 @@ Belfry opens one read-write SQLite client in the writer worker and a separate
 read-only client for queries. Foreign keys are enabled, journal mode is WAL,
 and synchronous mode is `NORMAL`. Migrations finish before readiness.
 
+`NORMAL` is a deliberate local-development tradeoff: committed WAL transactions
+recover across ordinary process crashes, while the newest transaction may be
+lost after an operating-system crash or power loss. Belfry does not present the
+Telemetry Store as a production durability boundary.
+
 ## Canonical records and indexes
 
 The schema stores:
@@ -65,5 +70,9 @@ belfry database vacuum
 belfry database reset --yes
 ```
 
-`reset` is deliberately confirmation-gated. `stats` can query a running Daemon
-without directly opening its write role.
+`reset` is deliberately confirmation-gated. It enables secure deletion, clears
+telemetry and diagnostics, checkpoints the WAL, and vacuums the database so the
+operation reclaims space instead of only making pages reusable. `stats` can
+query a running Daemon without directly opening its write role. It distinguishes
+live SQLite pages (the retention budget) from the apparent size of the database,
+WAL, and shared-memory files.

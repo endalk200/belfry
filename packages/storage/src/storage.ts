@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
 	CursorPosition,
@@ -10,7 +10,7 @@ import type {
 	TimeRange,
 	TraceSearchQuery,
 } from "@belfry/query-api";
-import type { ServiceIdentity, TraceDetail } from "@belfry/telemetry";
+import type { ServiceIdentity, SpanStructuralWarning, TraceDetail, TraceSpanDetail } from "@belfry/telemetry";
 import { LogDetailSchema, SpanDetailSchema, serviceIdentityKey } from "@belfry/telemetry";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Context, Effect, Layer } from "effect";
@@ -33,7 +33,7 @@ import {
 	type TraceRow,
 	traceSummaryFromRow,
 } from "./record-model.js";
-import { databaseSizeFor, runRetention } from "./retention.js";
+import { databaseSizeFor, runRetention, storageFileSizesFor } from "./retention.js";
 import { escapeLike, execute, ftsPhrase, placeholders, query } from "./sql.js";
 import type {
 	RetentionOptions,
@@ -52,10 +52,12 @@ export type TelemetryStorageOptions = {
 	readonly maxIndexedValueBytes?: number;
 	readonly maxIndexedAttributeKeys?: number;
 	readonly maxIndexedValuesPerKey?: number;
+	readonly maxTraceDetailSpans?: number;
 };
 
 const defaultMaxIndexedAttributes = 64;
 const defaultMaxIndexedValueBytes = 512;
+const defaultMaxTraceDetailSpans = 500;
 
 export class TelemetryStorage extends Context.Service<TelemetryStorage, TelemetryStorageService>()(
 	"@belfry/storage/TelemetryStorage",
@@ -69,7 +71,11 @@ export const openTelemetryStorage = (
 ): Effect.Effect<TelemetryStorageService, StorageFailure, import("effect").Scope.Scope> => {
 	const acquire = Effect.gen(function* () {
 		yield* Effect.try({
-			try: () => mkdirSync(dirname(options.databasePath), { recursive: true }),
+			try: () => {
+				const directory = dirname(options.databasePath);
+				mkdirSync(directory, { recursive: true, mode: 0o700 });
+				chmodSync(directory, 0o700);
+			},
 			catch: (cause) => storageFailure("open_failed", "Could not create the Telemetry Store directory.", cause),
 		});
 
@@ -80,6 +86,7 @@ export const openTelemetryStorage = (
 		yield* writer`PRAGMA synchronous = NORMAL`;
 		yield* writer`PRAGMA wal_autocheckpoint = 1000`;
 		yield* writer`PRAGMA auto_vacuum = INCREMENTAL`;
+		yield* Effect.sync(() => hardenStorageFiles(options.databasePath));
 		yield* runMigrations.pipe(Effect.provideService(SqlClient.SqlClient, writer));
 		const reader = yield* SqliteClient.make({
 			filename: options.databasePath,
@@ -105,13 +112,16 @@ export const openTelemetryStorage = (
 export const openTelemetryReader = (
 	options: TelemetryStorageOptions,
 ): Effect.Effect<TelemetryReaderService, StorageFailure, import("effect").Scope.Scope> =>
-	SqliteClient.make({
-		filename: options.databasePath,
-		readonly: true,
-		readwrite: false,
-		create: false,
-		disableWAL: true,
-	}).pipe(
+	Effect.sync(() => hardenStorageFiles(options.databasePath)).pipe(
+		Effect.andThen(
+			SqliteClient.make({
+				filename: options.databasePath,
+				readonly: true,
+				readwrite: false,
+				create: false,
+				disableWAL: true,
+			}),
+		),
 		Effect.provide(Reactivity.layer),
 		Effect.tap((reader) => reader`PRAGMA foreign_keys = ON`),
 		Effect.map((reader) => {
@@ -146,58 +156,68 @@ const makeStorage = (
 	const maxIndexedValueBytes = options.maxIndexedValueBytes ?? defaultMaxIndexedValueBytes;
 	const maxIndexedAttributeKeys = options.maxIndexedAttributeKeys ?? 256;
 	const maxIndexedValuesPerKey = options.maxIndexedValuesPerKey ?? 1_024;
+	const maxTraceDetailSpans = Math.max(
+		1,
+		Math.min(500, Math.trunc(options.maxTraceDetailSpans ?? defaultMaxTraceDetailSpans)),
+	);
 
 	const databaseSize = databaseSizeFor(reader);
+	const storageSizes = Effect.all({
+		databaseSizeBytes: databaseSize,
+		files: storageFileSizesFor(options.databasePath),
+	}).pipe(Effect.map(({ databaseSizeBytes, files }) => ({ databaseSizeBytes, ...files })));
 
 	const write = (batch: TelemetryWriteBatch): Effect.Effect<StorageWriteResult, StorageFailure> => {
 		const startedAt = performance.now();
-		const operation = writer.withTransaction(
-			Effect.gen(function* () {
-				let logIds: ReadonlyArray<string> = [];
-				let droppedRecords = 0n;
-				let truncatedValues = 0n;
-				if (batch.signal === "traces") {
-					const result = yield* writeSpans(
-						writer,
-						batch.spans,
-						maxIndexedAttributes,
-						maxIndexedValueBytes,
-						maxIndexedAttributeKeys,
-						maxIndexedValuesPerKey,
-					);
-					for (const traceId of result.traceIds) yield* materializeTrace(writer, traceId);
-					droppedRecords = result.droppedRecords;
-					truncatedValues = result.truncatedValues;
-					yield* incrementCounter(writer, "accepted_trace_records", BigInt(batch.spans.length));
-				} else {
-					const result = yield* writeLogs(
-						writer,
-						batch.logs,
-						maxIndexedAttributes,
-						maxIndexedValueBytes,
-						maxIndexedAttributeKeys,
-						maxIndexedValuesPerKey,
-					);
-					logIds = result.ids;
-					droppedRecords = result.droppedRecords;
-					truncatedValues = result.truncatedValues;
-					yield* incrementCounter(writer, "accepted_log_records", BigInt(batch.logs.length));
-				}
-				if (droppedRecords > 0n) yield* incrementCounter(writer, "dropped_records", droppedRecords);
-				if (truncatedValues > 0n) yield* incrementCounter(writer, "truncated_values", truncatedValues);
-				for (const diagnostic of batch.diagnostics ?? []) yield* writeDiagnostic(writer, diagnostic);
+		const operation = writer
+			.withTransaction(
+				Effect.gen(function* () {
+					let logIds: ReadonlyArray<string> = [];
+					let droppedRecords = 0n;
+					let truncatedValues = 0n;
+					if (batch.signal === "traces") {
+						const result = yield* writeSpans(
+							writer,
+							batch.spans,
+							maxIndexedAttributes,
+							maxIndexedValueBytes,
+							maxIndexedAttributeKeys,
+							maxIndexedValuesPerKey,
+						);
+						for (const traceId of result.traceIds) yield* materializeTrace(writer, traceId);
+						droppedRecords = result.droppedRecords;
+						truncatedValues = result.truncatedValues;
+						yield* incrementCounter(writer, "accepted_trace_records", BigInt(batch.spans.length));
+					} else {
+						const result = yield* writeLogs(
+							writer,
+							batch.logs,
+							maxIndexedAttributes,
+							maxIndexedValueBytes,
+							maxIndexedAttributeKeys,
+							maxIndexedValuesPerKey,
+						);
+						logIds = result.ids;
+						droppedRecords = result.droppedRecords;
+						truncatedValues = result.truncatedValues;
+						yield* incrementCounter(writer, "accepted_log_records", BigInt(batch.logs.length));
+					}
+					if (droppedRecords > 0n) yield* incrementCounter(writer, "dropped_records", droppedRecords);
+					if (truncatedValues > 0n) yield* incrementCounter(writer, "truncated_values", truncatedValues);
+					for (const diagnostic of batch.diagnostics ?? []) yield* writeDiagnostic(writer, diagnostic);
 
-				const durationMs = performance.now() - startedAt;
-				writeLatencies.push(durationMs);
-				if (writeLatencies.length > 1_024) writeLatencies.shift();
-				return {
-					records: batch.signal === "traces" ? batch.spans.length : batch.logs.length,
-					logIds,
-					durationMs,
-				};
-			}),
-		);
-		return mapStorageFailure(operation, "write_failed", "Could not durably write the OTLP batch.");
+					const durationMs = performance.now() - startedAt;
+					writeLatencies.push(durationMs);
+					if (writeLatencies.length > 1_024) writeLatencies.shift();
+					return {
+						records: batch.signal === "traces" ? batch.spans.length : batch.logs.length,
+						logIds,
+						durationMs,
+					};
+				}),
+			)
+			.pipe(Effect.tap(() => Effect.sync(() => hardenStorageFiles(options.databasePath))));
+		return mapStorageFailure(operation, "write_failed", "Could not commit the OTLP batch.");
 	};
 
 	const searchTraces = (queryRequest: TraceSearchQuery, cursor?: CursorPosition) => {
@@ -299,44 +319,95 @@ const makeStorage = (
 				reader,
 				`SELECT s.trace_id, s.span_id, s.detail_json,
 					(SELECT COUNT(*) FROM logs l WHERE l.trace_id = s.trace_id AND l.span_id = s.span_id) AS log_count
-				 FROM spans s WHERE s.trace_id = ? ORDER BY s.start_time_ns, s.span_id`,
-				[traceId],
+				 FROM spans s WHERE s.trace_id = ? ORDER BY s.start_time_ns, s.span_id LIMIT ?`,
+				[traceId, maxTraceDetailSpans + 1],
 			);
-			const parsedSpans = spanRows.map((row) => ({
+			const parsedSpans = spanRows.slice(0, maxTraceDetailSpans).map((row) => ({
 				...decodeJson(SpanDetailSchema, row.detail_json),
 				logCount: Number(row.log_count ?? 0n),
 			}));
 			const spans = orderSpanTree(parsedSpans);
-			const logRows = yield* query<LogRow>(
-				reader,
-				"SELECT log_id, detail_json FROM logs WHERE trace_id = ? ORDER BY COALESCE(timestamp_ns, observed_time_ns), log_id",
-				[traceId],
-			);
 			const serviceMap = yield* servicesForTraces(reader, [traceId]);
 			return {
 				...traceSummaryFromRow(trace, serviceMap.get(traceId) ?? []),
 				spans,
-				logs: logRows.map((row) => logSummary(decodeJson(LogDetailSchema, row.detail_json))),
+				spansTruncated: spanRows.length > maxTraceDetailSpans,
 			} satisfies TraceDetail;
 		});
 		return mapStorageFailureExceptNotFound(operation, "Could not load the trace.");
 	};
 
-	const getSpan = (traceId: string, spanId: string) =>
-		getTrace(traceId).pipe(
-			Effect.flatMap((trace) => {
-				const span = trace.spans.find((candidate) => candidate.spanId === spanId);
-				return span === undefined
-					? Effect.fail(
-							new StorageNotFound({
-								entity: "span",
-								id: `${traceId}/${spanId}`,
-								message: `Span ${spanId} was not found in trace ${traceId}.`,
-							}),
-						)
-					: Effect.succeed(span);
-			}),
-		);
+	const getSpan = (traceId: string, spanId: string) => {
+		const operation = Effect.gen(function* () {
+			const rows = yield* query<SpanRow>(
+				reader,
+				`SELECT s.trace_id, s.span_id, s.detail_json,
+					(SELECT COUNT(*) FROM logs l WHERE l.trace_id = s.trace_id AND l.span_id = s.span_id) AS log_count
+				 FROM spans s WHERE s.trace_id = ? AND s.span_id = ?`,
+				[traceId, spanId],
+			);
+			const row = rows[0];
+			if (row === undefined) {
+				return yield* Effect.fail(
+					new StorageNotFound({
+						entity: "span",
+						id: `${traceId}/${spanId}`,
+						message: `Span ${spanId} was not found in trace ${traceId}.`,
+					}),
+				);
+			}
+			const detail = decodeJson(SpanDetailSchema, row.detail_json);
+			const ancestry = yield* query<{ readonly depth: bigint | null; readonly cycle: bigint | null }>(
+				reader,
+				`WITH RECURSIVE ancestry(span_id, parent_span_id, depth, path, cycle) AS (
+					SELECT span_id, parent_span_id, 0, ',' || span_id || ',', 0
+					FROM spans WHERE trace_id = ? AND span_id = ?
+					UNION ALL
+					SELECT parent.span_id, parent.parent_span_id, ancestry.depth + 1,
+						ancestry.path || parent.span_id || ',',
+						CASE WHEN instr(ancestry.path, ',' || parent.span_id || ',') > 0 THEN 1 ELSE 0 END
+					FROM ancestry JOIN spans parent
+						ON parent.trace_id = ? AND parent.span_id = ancestry.parent_span_id
+					WHERE ancestry.parent_span_id IS NOT NULL AND ancestry.cycle = 0 AND ancestry.depth < 500
+				)
+				SELECT MAX(depth) AS depth, MAX(cycle) AS cycle FROM ancestry`,
+				[traceId, spanId, traceId],
+			);
+			const parentExists =
+				detail.parentSpanId === undefined
+					? true
+					: (yield* query<{ readonly present: bigint }>(
+							reader,
+							"SELECT EXISTS(SELECT 1 FROM spans WHERE trace_id = ? AND span_id = ?) AS present",
+							[traceId, detail.parentSpanId],
+						))[0]?.present === 1n;
+			const rootCount =
+				(yield* query<{ readonly count: bigint }>(
+					reader,
+					`SELECT COUNT(*) AS count FROM spans span
+					 LEFT JOIN spans parent ON parent.trace_id = span.trace_id AND parent.span_id = span.parent_span_id
+					 WHERE span.trace_id = ? AND
+						(span.parent_span_id IS NULL OR parent.span_id IS NULL OR span.parent_span_id = span.span_id)`,
+					[traceId],
+				))[0]?.count ?? 0n;
+			const cycle = ancestry[0]?.cycle === 1n;
+			const warnings = new Set<SpanStructuralWarning>(detail.warnings);
+			if (!parentExists) {
+				warnings.add("missing-parent");
+				warnings.add("orphan-span");
+			}
+			if (cycle) warnings.add("cycle");
+			const root = detail.parentSpanId === undefined || !parentExists || detail.parentSpanId === detail.spanId;
+			if (root && rootCount > 1n) warnings.add("multiple-roots");
+			return {
+				...detail,
+				logCount: Number(row.log_count ?? 0n),
+				depth: cycle ? 0 : Number(ancestry[0]?.depth ?? 0n),
+				warnings: [...warnings],
+			} satisfies TraceSpanDetail;
+		});
+		return mapStorageFailureExceptNotFound(operation, "Could not load the span.");
+	};
 
 	const searchLogs = (queryRequest: LogSearchQuery, cursor?: CursorPosition) => {
 		const clauses = [
@@ -504,7 +575,7 @@ const makeStorage = (
 	};
 
 	const health = Effect.gen(function* () {
-		const databaseSizeBytes = yield* databaseSize;
+		const sizes = yield* storageSizes;
 		const retention = yield* query<{ last_error: string | null }>(
 			reader,
 			"SELECT last_error FROM retention_state WHERE id = 1",
@@ -518,7 +589,7 @@ const makeStorage = (
 			readsAvailable: true,
 			queueDepth: 0,
 			queueBytes: 0n,
-			databaseSizeBytes,
+			...sizes,
 			...(retentionError === undefined ? {} : { message: retentionError }),
 		} satisfies Health;
 	}).pipe((effect) => mapStorageFailure(effect, "read_failed", "Could not inspect Telemetry Store health."));
@@ -546,7 +617,7 @@ const makeStorage = (
 			droppedRecords: counters.get("dropped_records") ?? 0n,
 			droppedDiagnostics: 0n,
 			truncatedValues: counters.get("truncated_values") ?? 0n,
-			databaseSizeBytes: yield* databaseSize,
+			...(yield* storageSizes),
 			retentionDeletedRecords: retention[0]?.deleted_records ?? 0n,
 			retentionRunning: retention[0]?.running === 1n,
 		} satisfies IngestionStats;
@@ -564,7 +635,7 @@ const makeStorage = (
 			writerRole: "read-write",
 			readerRole: "read-only",
 			schemaVersion: Number(migration?.version ?? 0n),
-			databaseSizeBytes: yield* databaseSize,
+			...(yield* storageSizes),
 		} satisfies StorageInformation;
 	}).pipe((effect) => mapStorageFailure(effect, "read_failed", "Could not inspect the Telemetry Store."));
 
@@ -672,33 +743,47 @@ const makeStorage = (
 		"Could not checkpoint the Telemetry Store WAL.",
 	).pipe(Effect.asVoid);
 
+	const compactStorageFiles = Effect.gen(function* () {
+		yield* execute(writer, "PRAGMA wal_checkpoint(TRUNCATE)");
+		yield* execute(writer, "VACUUM");
+		yield* execute(writer, "PRAGMA wal_checkpoint(TRUNCATE)");
+		yield* Effect.try({
+			try: () => hardenStorageFiles(options.databasePath),
+			catch: (cause) => cause,
+		});
+	});
+
 	const vacuum = mapStorageFailure(
-		execute(writer, "VACUUM"),
+		compactStorageFiles,
 		"maintenance_failed",
-		"Could not vacuum the Telemetry Store.",
+		"Could not checkpoint and vacuum the Telemetry Store.",
 	).pipe(Effect.asVoid);
 
 	const reset = mapStorageFailure(
-		writer.withTransaction(
-			Effect.gen(function* () {
-				yield* execute(writer, "DELETE FROM span_search");
-				yield* execute(writer, "DELETE FROM log_search");
-				yield* execute(writer, "DELETE FROM logs");
-				yield* execute(writer, "DELETE FROM spans");
-				yield* execute(writer, "DELETE FROM traces");
-				yield* execute(writer, "DELETE FROM diagnostics");
-				yield* execute(writer, "DELETE FROM services");
-				yield* execute(writer, "DELETE FROM scopes");
-				yield* execute(writer, "DELETE FROM resources");
-				yield* execute(writer, "UPDATE ingestion_counters SET value = 0");
-				yield* execute(
-					writer,
-					"UPDATE retention_state SET running = 0, deleted_records = 0, last_run_ns = NULL, last_error = NULL WHERE id = 1",
-				);
-			}),
-		),
+		Effect.gen(function* () {
+			yield* execute(writer, "PRAGMA secure_delete = ON");
+			yield* writer.withTransaction(
+				Effect.gen(function* () {
+					yield* execute(writer, "DELETE FROM span_search");
+					yield* execute(writer, "DELETE FROM log_search");
+					yield* execute(writer, "DELETE FROM logs");
+					yield* execute(writer, "DELETE FROM spans");
+					yield* execute(writer, "DELETE FROM traces");
+					yield* execute(writer, "DELETE FROM diagnostics");
+					yield* execute(writer, "DELETE FROM services");
+					yield* execute(writer, "DELETE FROM scopes");
+					yield* execute(writer, "DELETE FROM resources");
+					yield* execute(writer, "UPDATE ingestion_counters SET value = 0");
+					yield* execute(
+						writer,
+						"UPDATE retention_state SET running = 0, deleted_records = 0, last_run_ns = NULL, last_error = NULL WHERE id = 1",
+					);
+				}),
+			);
+			yield* compactStorageFiles;
+		}),
 		"maintenance_failed",
-		"Could not reset the Telemetry Store.",
+		"Could not securely reset and compact the Telemetry Store.",
 	).pipe(Effect.asVoid);
 
 	return {
@@ -721,6 +806,12 @@ const makeStorage = (
 		vacuum,
 		reset,
 	};
+};
+
+const hardenStorageFiles = (databasePath: string): void => {
+	for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
+		if (existsSync(path)) chmodSync(path, 0o600);
+	}
 };
 
 const servicesForTraces = (client: SqlClientType, traceIds: ReadonlyArray<string>) => {

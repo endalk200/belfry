@@ -21,12 +21,13 @@ the shipped system rather than an aspirational all-signal platform.
 
 Architecture decisions live under [ADR](adr/). Agent workflows live under
 `skills/`. Accepted benchmark results live under [benchmarks](benchmarks/).
+The current ship checklist is [Belfry 0.1.0](how-tos/release-0.1.0.md).
 
 ## Shipped boundary
 
 - OTLP/HTTP traces and logs over protobuf or JSON, with optional gzip.
 - One verified, machine-wide, loopback-only Daemon on port `4318` by default.
-- Durable SQLite/WAL storage with bounded retention and exact nanosecond values.
+- Persistent SQLite/WAL storage with bounded retention and exact nanosecond values.
 - Service discovery, trace waterfall, log detail, full-text search, facets,
   indexed scalar attributes, and trace/log/span correlation.
 - A React/Vite Workspace over renderer-independent state and query modules.

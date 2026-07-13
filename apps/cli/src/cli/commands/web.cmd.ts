@@ -35,8 +35,8 @@ export class WebBrowserFailure extends Schema.TaggedErrorClass<WebBrowserFailure
 }) {}
 
 export const openBrowser = (url: string): Effect.Effect<void, WebBrowserFailure> =>
-	Effect.try({
-		try: () => {
+	Effect.tryPromise({
+		try: async () => {
 			const command =
 				process.platform === "darwin"
 					? ["open", url]
@@ -44,7 +44,8 @@ export const openBrowser = (url: string): Effect.Effect<void, WebBrowserFailure>
 						? ["cmd", "/c", "start", "", url]
 						: ["xdg-open", url];
 			const child = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-			child.unref();
+			const exitCode = await child.exited;
+			if (exitCode !== 0) throw new Error(`${command[0]} exited with status ${exitCode}`);
 		},
 		catch: (cause) =>
 			new WebBrowserFailure({

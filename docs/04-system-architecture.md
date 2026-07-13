@@ -48,9 +48,10 @@ queries responsive while writes are in progress.
 `belfry`, `belfry web`, and `belfry daemon start` all call the same Daemon
 manager. The first two open or print the Daemon-served browser Workspace. The
 manager uses an exclusive lock plus a registry containing PID, process start
-identity, endpoint, and ownership token. Adoption verifies identity and health;
+identity, endpoint, service version, and ownership token. Adoption verifies identity and health;
 stop signals only the verified process. Stale registries are recovered without
-killing unrelated reused PIDs.
+killing unrelated reused PIDs. A new CLI version replaces an older verified
+Daemon instead of silently adopting incompatible code.
 
 The Daemon attempts writer/migration and read-only Store startup before binding.
 If either Store role is unavailable, it still serves health and any safely
@@ -63,7 +64,10 @@ registry ownership.
 
 The configured host must be loopback (`127.0.0.1`, `localhost`, or `::1`). The
 single listener serves OTLP, the Query API, browser assets, docs, and OpenAPI.
-There is no remote-bind escape hatch in this delivery.
+There is no remote-bind escape hatch in this delivery. Requests must also carry
+a loopback HTTP `Host`; browser requests with an `Origin` must use an HTTP(S)
+loopback origin. This blocks remote websites and DNS-rebinding hosts while
+allowing local browser SDKs to export OTLP directly.
 
 The Store location follows platform state conventions and can be inspected with
 `belfry database path`. Projects share it and remain distinguishable through

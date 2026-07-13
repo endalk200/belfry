@@ -36,7 +36,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
 - Be useful within one command and one local process boundary.
 - Preserve complete trace and log records across restarts.
-- Acknowledge OTLP only after durable storage.
+- Acknowledge OTLP only after the local SQLite transaction commits.
 - Make Service filtering and trace/log correlation consistent everywhere.
 - Remain responsive under bounded representative ingestion.
 - Give operators clear lifecycle, health, diagnostics, and database controls.

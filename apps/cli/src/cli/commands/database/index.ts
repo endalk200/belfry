@@ -3,6 +3,7 @@ import { DaemonLifecycleFailure, DaemonManager } from "@belfry/daemon/lifecycle"
 import type { TelemetryReaderService, TelemetryStorageService } from "@belfry/storage";
 import { Console, Effect, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
+import { stringifyStableJson } from "../../../runtime/json.js";
 
 export class DatabaseOperationFailure extends Schema.TaggedErrorClass<DatabaseOperationFailure>()(
 	"DatabaseOperationFailure",
@@ -19,7 +20,7 @@ const pathCommand = Command.make("path", { json: jsonFlag }, ({ json }) =>
 		const configuration = yield* BelfryConfig;
 		yield* Console.log(
 			json
-				? stringifyJson({ databasePath: configuration.storage.databasePath })
+				? stringifyStableJson({ databasePath: configuration.storage.databasePath })
 				: configuration.storage.databasePath,
 		);
 	}),
@@ -42,24 +43,20 @@ const statsHandler = ({ json }: { readonly json: boolean }) =>
 							})),
 						),
 					);
-		yield* Console.log(json ? stringifyJson(report) : formatStats(report));
+		yield* Console.log(json ? stringifyStableJson(report) : formatStats(report));
 	});
 
 const statsCommand = Command.make("stats", { json: jsonFlag }, statsHandler).pipe(
 	Command.withDescription("Show Telemetry Store and ingestion statistics"),
 );
 
-const statusCommand = Command.make("status", { json: jsonFlag }, statsHandler).pipe(
-	Command.withDescription("Show database maintenance and retention status"),
-);
-
 const vacuumCommand = Command.make("vacuum", { json: jsonFlag }, ({ json }) =>
 	Effect.gen(function* () {
 		const configuration = yield* BelfryConfig;
-		yield* withStoppedStorage(configuration, (storage) => storage.vacuum.pipe(Effect.andThen(storage.checkpoint)));
+		yield* withStoppedStorage(configuration, (storage) => storage.vacuum);
 		yield* Console.log(
 			json
-				? stringifyJson({ state: "vacuumed", databasePath: configuration.storage.databasePath })
+				? stringifyStableJson({ state: "vacuumed", databasePath: configuration.storage.databasePath })
 				: `Vacuumed and checkpointed ${configuration.storage.databasePath}.`,
 		);
 	}),
@@ -71,7 +68,7 @@ const checkpointCommand = Command.make("checkpoint", { json: jsonFlag }, ({ json
 		yield* withStoppedStorage(configuration, (storage) => storage.checkpoint);
 		yield* Console.log(
 			json
-				? stringifyJson({ state: "checkpointed", databasePath: configuration.storage.databasePath })
+				? stringifyStableJson({ state: "checkpointed", databasePath: configuration.storage.databasePath })
 				: `Checkpointed ${configuration.storage.databasePath}.`,
 		);
 	}),
@@ -96,12 +93,10 @@ const resetCommand = Command.make(
 				);
 			}
 			const configuration = yield* BelfryConfig;
-			yield* withStoppedStorage(configuration, (storage) =>
-				storage.reset.pipe(Effect.andThen(storage.checkpoint)),
-			);
+			yield* withStoppedStorage(configuration, (storage) => storage.reset);
 			yield* Console.log(
 				json
-					? stringifyJson({ state: "reset", databasePath: configuration.storage.databasePath })
+					? stringifyStableJson({ state: "reset", databasePath: configuration.storage.databasePath })
 					: `Reset all telemetry in ${configuration.storage.databasePath}.`,
 			);
 		}),
@@ -110,7 +105,7 @@ const resetCommand = Command.make(
 export const databaseCommand = Command.make("database").pipe(
 	Command.withDescription("Inspect and maintain the machine-wide Telemetry Store"),
 	Command.withShortDescription("Manage Telemetry Store"),
-	Command.withSubcommands([pathCommand, statsCommand, statusCommand, checkpointCommand, vacuumCommand, resetCommand]),
+	Command.withSubcommands([pathCommand, statsCommand, checkpointCommand, vacuumCommand, resetCommand]),
 );
 
 const withStoppedStorage = <A, E>(
@@ -191,9 +186,6 @@ const databaseFailure = (message: string, cause: unknown) =>
 		message: `${message} ${cause instanceof Error ? cause.message : String(cause)}`,
 	});
 
-const stringifyJson = (value: unknown): string =>
-	JSON.stringify(value, (_key, item: unknown) => (typeof item === "bigint" ? item.toString() : item));
-
 const formatStats = (report: Record<string, unknown>): string => {
 	const information = "information" in report ? (report.information as Record<string, unknown>) : report;
 	const ingestion = (report.ingestion ?? {}) as Record<string, unknown>;
@@ -202,7 +194,9 @@ const formatStats = (report: Record<string, unknown>): string => {
 		`Daemon: ${String(report.daemon ?? "unknown")}`,
 		`Schema: ${String(information.schemaVersion ?? "managed by running Daemon")}`,
 		`Journal: ${String(information.journalMode ?? "WAL")}`,
-		`Database bytes: ${String(information.databaseSizeBytes ?? ingestion.databaseSizeBytes ?? "unknown")}`,
+		`Live database bytes: ${String(information.databaseSizeBytes ?? ingestion.databaseSizeBytes ?? "unknown")}`,
+		`Storage files bytes: ${String(information.storageSizeBytes ?? ingestion.storageSizeBytes ?? "unknown")}`,
+		`WAL bytes: ${String(information.walSizeBytes ?? ingestion.walSizeBytes ?? "unknown")}`,
 		`Queue: ${String(ingestion.queueDepth ?? "unknown")} requests / ${String(ingestion.queueBytes ?? "unknown")} bytes`,
 		`Retention: ${ingestion.retentionRunning === true ? "running" : "idle"} · deleted ${String(ingestion.retentionDeletedRecords ?? 0)} records`,
 	].join("\n");

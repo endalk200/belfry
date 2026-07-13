@@ -18,6 +18,7 @@ import { Schema } from "effect";
 
 export const QueryWorkerConfigurationSchema = Schema.Struct({
 	databasePath: Schema.String,
+	maxTraceDetailSpans: BoundedLimitSchema,
 });
 export type QueryWorkerConfiguration = typeof QueryWorkerConfigurationSchema.Type;
 

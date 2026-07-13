@@ -58,6 +58,23 @@ describe("telemetry schemas", () => {
 		assert.deepStrictEqual(Schema.encodeSync(OtlpAnyValueSchema)(decoded), encoded);
 	});
 
+	it("encodes non-finite OTLP doubles into lossless JSON values", () => {
+		const jsonSchema = Schema.toCodecJson(OtlpAnyValueSchema);
+		for (const [value, encodedValue] of [
+			[Number.NaN, "NaN"],
+			[Number.POSITIVE_INFINITY, "Infinity"],
+			[Number.NEGATIVE_INFINITY, "-Infinity"],
+		] as const) {
+			const encoded = Schema.encodeSync(jsonSchema)({ type: "double", value });
+			assert.deepStrictEqual(encoded, { type: "double", value: encodedValue });
+			const decoded = Schema.decodeUnknownSync(jsonSchema)(JSON.parse(JSON.stringify(encoded)));
+			assert.strictEqual(decoded.type, "double");
+			if (decoded.type !== "double") continue;
+			if (Number.isNaN(value)) assert.isTrue(Number.isNaN(decoded.value));
+			else assert.strictEqual(decoded.value, value);
+		}
+	});
+
 	it("validates complete span details at the public telemetry seam", () => {
 		const decoded = Schema.decodeUnknownSync(SpanDetailSchema)({
 			traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
