@@ -5,20 +5,90 @@ import type { BelfryConfiguration } from "@belfry/config";
 import { HealthSchema } from "@belfry/query-api";
 import { Context, Effect, Layer, Schema } from "effect";
 
-export const DaemonRegistrySchema = Schema.Struct({
-	version: Schema.Literal(1),
+const DaemonProcessIdentityFields = {
 	pid: Schema.Number,
 	startedAt: Schema.Number,
 	nonce: Schema.String,
 	endpoint: Schema.String,
+};
+
+const DaemonRegistryBaseFields = {
+	...DaemonProcessIdentityFields,
+};
+
+export const DaemonRegistrySchema = Schema.Struct({
+	version: Schema.Literal(2),
+	...DaemonRegistryBaseFields,
 	serviceVersion: Schema.String,
 });
 export type DaemonRegistry = typeof DaemonRegistrySchema.Type;
 
+const VersionOneDaemonRegistrySchema = Schema.Struct({
+	version: Schema.Literal(1),
+	...DaemonRegistryBaseFields,
+	serviceVersion: Schema.String,
+});
+type VersionOneDaemonRegistry = typeof VersionOneDaemonRegistrySchema.Type;
+
+const LegacyDaemonRegistrySchema = Schema.Struct({
+	version: Schema.Literal(1),
+	...DaemonRegistryBaseFields,
+});
+type LegacyDaemonRegistry = typeof LegacyDaemonRegistrySchema.Type;
+type CompatibleDaemonRegistry = DaemonRegistry | VersionOneDaemonRegistry | LegacyDaemonRegistry;
+
+const DaemonRegistryReadSchema = Schema.Union(
+	[
+		Schema.Struct({
+			_tag: Schema.tagDefaultOmit("current"),
+			...DaemonRegistrySchema.fields,
+		}),
+		Schema.Struct({
+			_tag: Schema.tagDefaultOmit("versionOne"),
+			...VersionOneDaemonRegistrySchema.fields,
+		}),
+		Schema.Struct({
+			_tag: Schema.tagDefaultOmit("legacy"),
+			...LegacyDaemonRegistrySchema.fields,
+		}),
+	],
+	{ mode: "oneOf" },
+);
+
+const LegacyDaemonIdentitySchema = Schema.Struct(DaemonProcessIdentityFields);
+
+const LegacyHealthSchema = Schema.Struct({
+	status: Schema.Literals(["starting", "ok", "degraded", "stopping"]),
+	live: Schema.Boolean,
+	migrationReady: Schema.Boolean,
+	writerReady: Schema.Boolean,
+	readsAvailable: Schema.Boolean,
+	queueDepth: Schema.Number,
+	queueBytes: Schema.BigIntFromString,
+	databaseSizeBytes: Schema.BigIntFromString,
+	daemon: Schema.optional(LegacyDaemonIdentitySchema),
+	message: Schema.optional(Schema.String),
+});
+
+const DaemonHealthReadSchema = Schema.Union([
+	Schema.Struct({
+		_tag: Schema.tagDefaultOmit("current"),
+		...HealthSchema.fields,
+	}),
+	Schema.Struct({
+		_tag: Schema.tagDefaultOmit("legacy"),
+		...LegacyHealthSchema.fields,
+	}),
+]);
+
 export type DaemonStatus =
 	| { readonly state: "stopped"; readonly message: string }
-	| { readonly state: "running"; readonly registry: DaemonRegistry; readonly message: string }
-	| { readonly state: "stale" | "unhealthy"; readonly registry?: DaemonRegistry; readonly message: string };
+	| { readonly state: "running"; readonly registry: CompatibleDaemonRegistry; readonly message: string }
+	| {
+			readonly state: "stale" | "unhealthy";
+			readonly registry?: CompatibleDaemonRegistry;
+			readonly message: string;
+	  };
 
 export type DaemonStartResult = {
 	readonly adopted: boolean;
@@ -49,7 +119,7 @@ export type DaemonManagerService = {
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E | DaemonLifecycleFailure, R>;
 	readonly start: Effect.Effect<DaemonStartResult, DaemonLifecycleFailure>;
-	readonly stop: Effect.Effect<DaemonRegistry, DaemonLifecycleFailure>;
+	readonly stop: Effect.Effect<CompatibleDaemonRegistry, DaemonLifecycleFailure>;
 	readonly restart: Effect.Effect<DaemonStartResult, DaemonLifecycleFailure>;
 	readonly serve: Effect.Effect<never, DaemonLifecycleFailure, import("effect").Scope.Scope>;
 };
@@ -116,7 +186,11 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 				config.daemon.startupTimeoutMs,
 				Effect.gen(function* () {
 					const current = yield* status;
-					if (current.state === "running" && current.registry.serviceVersion === serviceVersion) {
+					if (
+						current.state === "running" &&
+						isCurrentDaemonRegistry(current.registry) &&
+						current.registry.serviceVersion === serviceVersion
+					) {
 						yield* writeRegistry(config.daemon.registryPath, current.registry);
 						return { adopted: true, registry: current.registry };
 					}
@@ -137,7 +211,7 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 					}
 					yield* cleanupStaleFiles(config);
 					yield* spawnDaemon(options.command ?? defaultDaemonCommand(), config.daemon.stateDirectory);
-					const registry = yield* waitForRunning(status, config.daemon.startupTimeoutMs);
+					const registry = yield* waitForRunning(status, config.daemon.startupTimeoutMs, serviceVersion);
 					return { adopted: false, registry };
 				}),
 			),
@@ -178,7 +252,7 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 			),
 		);
 
-	const terminateDaemon = (registry: DaemonRegistry) =>
+	const terminateDaemon = (registry: CompatibleDaemonRegistry) =>
 		Effect.gen(function* () {
 			if (registry.pid === process.pid) {
 				return yield* Effect.fail(
@@ -239,7 +313,7 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 			),
 		);
 		const registry: DaemonRegistry = {
-			version: 1,
+			version: 2,
 			pid: process.pid,
 			startedAt: server.startedAt,
 			nonce: server.nonce,
@@ -266,11 +340,15 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 	return { status, withStoppedDaemonLock, start, stop, restart, serve };
 };
 
-const readRegistry = (path: string): Effect.Effect<DaemonRegistry | undefined, DaemonLifecycleFailure> =>
+const readRegistry = (path: string): Effect.Effect<CompatibleDaemonRegistry | undefined, DaemonLifecycleFailure> =>
 	Effect.tryPromise({
 		try: async () => {
 			try {
-				return Schema.decodeUnknownSync(DaemonRegistrySchema)(JSON.parse(await readFile(path, "utf8")));
+				const decoded = Schema.decodeUnknownSync(DaemonRegistryReadSchema, {
+					onExcessProperty: "error",
+				})(JSON.parse(await readFile(path, "utf8")));
+				const { _tag: _, ...registry } = decoded;
+				return registry;
 			} catch (cause) {
 				if (isFileCode(cause, "ENOENT")) return undefined;
 				throw cause;
@@ -286,13 +364,14 @@ const readRegistry = (path: string): Effect.Effect<DaemonRegistry | undefined, D
 const readRegistryWithLockFallback = (
 	registryPath: string,
 	lockPath: string,
-): Effect.Effect<DaemonRegistry | undefined, DaemonLifecycleFailure> =>
+): Effect.Effect<CompatibleDaemonRegistry | undefined, DaemonLifecycleFailure> =>
 	Effect.gen(function* () {
 		const registry = yield* Effect.result(readRegistry(registryPath));
 		if (registry._tag === "Success" && registry.success !== undefined) return registry.success;
 		const lockRegistry = yield* Effect.result(readRegistry(lockPath));
 		if (lockRegistry._tag === "Success" && lockRegistry.success !== undefined) return lockRegistry.success;
 		if (registry._tag === "Failure") return yield* Effect.fail(registry.failure);
+		if (lockRegistry._tag === "Failure") return yield* Effect.fail(lockRegistry.failure);
 		return undefined;
 	});
 
@@ -323,19 +402,21 @@ const ensureStateDirectory = (path: string): Effect.Effect<void, DaemonLifecycle
 			}),
 	});
 
-const verifyIdentity = (registry: DaemonRegistry): Effect.Effect<void, string> =>
+const verifyIdentity = (registry: CompatibleDaemonRegistry): Effect.Effect<void, string> =>
 	Effect.tryPromise({
 		try: async () => {
 			const response = await fetch(`${registry.endpoint}/api/health`, { signal: AbortSignal.timeout(750) });
 			if (!response.ok) throw new Error(`health returned HTTP ${response.status}`);
-			const health = Schema.decodeUnknownSync(HealthSchema)(await response.json());
+			const health = Schema.decodeUnknownSync(DaemonHealthReadSchema)(await response.json());
+			const healthServiceVersion = health._tag === "current" ? health.daemon?.serviceVersion : undefined;
+			const daemon = health.daemon;
 			if (
-				health.daemon === undefined ||
-				health.daemon.pid !== registry.pid ||
-				health.daemon.startedAt !== registry.startedAt ||
-				health.daemon.nonce !== registry.nonce ||
-				health.daemon.endpoint !== registry.endpoint ||
-				health.daemon.serviceVersion !== registry.serviceVersion
+				daemon === undefined ||
+				daemon.pid !== registry.pid ||
+				daemon.startedAt !== registry.startedAt ||
+				daemon.nonce !== registry.nonce ||
+				daemon.endpoint !== registry.endpoint ||
+				healthServiceVersion !== daemonServiceVersion(registry)
 			) {
 				throw new Error("health identity does not match the registry");
 			}
@@ -378,12 +459,19 @@ const defaultDaemonCommand = (): ReadonlyArray<string> => {
 const waitForRunning = (
 	status: Effect.Effect<DaemonStatus>,
 	timeoutMs: number,
+	serviceVersion: string,
 ): Effect.Effect<DaemonRegistry, DaemonLifecycleFailure> =>
 	Effect.gen(function* () {
 		const started = Date.now();
 		while (Date.now() - started < timeoutMs) {
 			const current = yield* status;
-			if (current.state === "running") return current.registry;
+			if (
+				current.state === "running" &&
+				isCurrentDaemonRegistry(current.registry) &&
+				current.registry.serviceVersion === serviceVersion
+			) {
+				return current.registry;
+			}
 			yield* Effect.sleep(40);
 		}
 		return yield* Effect.fail(
@@ -537,6 +625,12 @@ const processExists = (pid: number): boolean => {
 		return isFileCode(cause, "EPERM");
 	}
 };
+
+const isCurrentDaemonRegistry = (registry: CompatibleDaemonRegistry): registry is DaemonRegistry =>
+	registry.version === 2;
+
+const daemonServiceVersion = (registry: CompatibleDaemonRegistry): string | undefined =>
+	"serviceVersion" in registry ? registry.serviceVersion : undefined;
 
 const isFileCode = (cause: unknown, code: string): boolean =>
 	typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;

@@ -15,11 +15,11 @@
 		"format": "turbo run format",
 		"format:check": "turbo run format:check",
 		"check-types": "turbo run check-types",
-		"cli": "bun run apps/cli/src/bin.ts --",
+		"cli": "bun --conditions=development run apps/cli/src/bin.ts --",
 		"release:audit": "bun run scripts/audit-release.ts",
 		"release:smoke": "bun run scripts/smoke-npm-package.ts",
 		"release:verify": "bun run scripts/verify-npm-package.ts",
-		"belfry": "bun run apps/cli/src/bin.ts --",
+		"belfry": "bun --conditions=development run apps/cli/src/bin.ts --",
 		"sync-cli-version": "bun run scripts/sync-cli-version.ts",
 		"version-packages": "changeset version && bun run sync-cli-version"
 	},

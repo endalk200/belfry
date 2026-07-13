@@ -138,7 +138,7 @@ describe("belfry CLI", () => {
 				start: Effect.succeed({
 					adopted: false,
 					registry: {
-						version: 1,
+						version: 2,
 						pid: 42,
 						startedAt: 1,
 						nonce: "test",
@@ -383,7 +383,7 @@ describe("belfry CLI", () => {
 				start: Effect.succeed({
 					adopted: true,
 					registry: {
-						version: 1,
+						version: 2,
 						pid: 42,
 						startedAt: 1,
 						nonce: "test",

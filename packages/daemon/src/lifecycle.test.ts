@@ -11,19 +11,34 @@ const repository = fileURLToPath(new URL("../../../", import.meta.url));
 const cliEntry = join(repository, "apps/cli/src/bin.ts");
 
 describe("machine-wide Daemon lifecycle", () => {
+	it("recognizes and replaces a verified legacy Daemon", async () => {
+		const { stateDirectory, port, env } = await makeLifecycleTestEnvironment("belfry-legacy-lifecycle-");
+		const legacy = spawn("bun", ["-e", legacyDaemonSource, stateDirectory, String(port)], {
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let running = false;
+		try {
+			const legacyRegistry = await readJsonLine(legacy.stdout);
+			const status = runCli(["daemon", "status", "--json"], env);
+			assert.strictEqual(status.state, "running");
+			assert.strictEqual(status.pid, legacyRegistry.pid);
+			assert.notProperty(status, "serviceVersion");
+
+			const started = await runCliAsync(["daemon", "start", "--json"], env);
+			running = true;
+			assert.strictEqual(started.state, "running");
+			assert.strictEqual(started.adopted, false);
+			assert.notStrictEqual(started.pid, legacyRegistry.pid);
+			assert.strictEqual(started.version, 2);
+			assert.strictEqual(typeof started.serviceVersion, "string");
+		} finally {
+			if (running) runCli(["daemon", "stop", "--json"], env, true);
+			if (legacy.exitCode === null) legacy.kill("SIGKILL");
+		}
+	}, 30_000);
+
 	it("starts, adopts, survives clients, restarts with persisted data, and stops cleanly", async () => {
-		const stateDirectory = mkdtempSync(join(tmpdir(), "belfry-lifecycle-"));
-		const configPath = join(stateDirectory, "config.toml");
-		writeFileSync(configPath, "");
-		const port = await availablePort();
-		const env = {
-			...process.env,
-			BELFRY_CONFIG_PATH: configPath,
-			BELFRY_STATE_DIRECTORY: stateDirectory,
-			BELFRY_DAEMON_PORT: String(port),
-			BELFRY_TELEMETRY: "false",
-			NO_COLOR: "1",
-		};
+		const { stateDirectory, port, env } = await makeLifecycleTestEnvironment("belfry-lifecycle-");
 		const traceStartNs = BigInt(Date.now()) * 1_000_000n;
 		let running = false;
 		try {
@@ -167,6 +182,98 @@ const readOutput = (stream: Readable): Promise<string> =>
 		stream.once("end", () => resolve(output));
 		stream.once("error", reject);
 	});
+
+const makeLifecycleTestEnvironment = async (prefix: string) => {
+	const stateDirectory = mkdtempSync(join(tmpdir(), prefix));
+	const configPath = join(stateDirectory, "config.toml");
+	writeFileSync(configPath, "");
+	const port = await availablePort();
+	return {
+		stateDirectory,
+		port,
+		env: {
+			...process.env,
+			BELFRY_CONFIG_PATH: configPath,
+			BELFRY_STATE_DIRECTORY: stateDirectory,
+			BELFRY_DAEMON_PORT: String(port),
+			BELFRY_TELEMETRY: "false",
+			NO_COLOR: "1",
+		},
+	};
+};
+
+const readJsonLine = (stream: Readable): Promise<Record<string, unknown>> =>
+	new Promise((resolve, reject) => {
+		let output = "";
+		const timeout = setTimeout(() => reject(new Error("Legacy Daemon did not become ready.")), 5_000);
+		stream.setEncoding("utf8");
+		stream.on("data", (chunk: string) => {
+			output += chunk;
+			const newline = output.indexOf("\n");
+			if (newline === -1) return;
+			clearTimeout(timeout);
+			resolve(JSON.parse(output.slice(0, newline)) as Record<string, unknown>);
+		});
+		stream.once("error", (cause) => {
+			clearTimeout(timeout);
+			reject(cause);
+		});
+	});
+
+const legacyDaemonSource = `
+import { open, unlink } from "node:fs/promises";
+import { join } from "node:path";
+
+const stateDirectory = process.argv[1];
+const port = Number(process.argv[2]);
+const endpoint = "http://127.0.0.1:" + port;
+const registryPath = join(stateDirectory, "daemon.json");
+const lockPath = join(stateDirectory, "daemon.lock");
+const lock = await open(lockPath, "wx", 0o600);
+const registry = {
+	version: 1,
+	pid: process.pid,
+	startedAt: Date.now(),
+	nonce: crypto.randomUUID(),
+	endpoint,
+};
+const server = Bun.serve({
+	hostname: "127.0.0.1",
+	port,
+	fetch(request) {
+		if (new URL(request.url).pathname !== "/api/health") return new Response("Not Found", { status: 404 });
+		return Response.json({
+			status: "ok",
+			live: true,
+			migrationReady: true,
+			writerReady: true,
+			readsAvailable: true,
+			queueDepth: 0,
+			queueBytes: "0",
+			databaseSizeBytes: "0",
+			daemon: {
+				pid: registry.pid,
+				startedAt: registry.startedAt,
+				nonce: registry.nonce,
+				endpoint: registry.endpoint,
+			},
+		});
+	},
+});
+await lock.writeFile(JSON.stringify(registry));
+console.log(JSON.stringify(registry));
+
+process.once("SIGTERM", () => {
+	void (async () => {
+		await server.stop(true);
+		await lock.close();
+		await unlink(registryPath).catch(() => undefined);
+		await unlink(lockPath).catch(() => undefined);
+		process.exit(0);
+	})();
+});
+await new Promise(() => undefined);
+`;
 
 const searchTraces = async (port: number, traceStartNs: bigint) => {
 	let response: Response | undefined;
