@@ -32,7 +32,7 @@ and is sent only after the writer worker commits the batch. Belfry returns:
 
 | Status | Meaning |
 | --- | --- |
-| `200` | Durable OTLP export response |
+| `200` | The local SQLite transaction committed |
 | `400` | Malformed or invalid payload |
 | `413` | Compressed or decompressed size limit exceeded |
 | `415` | Unsupported content type or content encoding |
@@ -41,6 +41,11 @@ and is sent only after the writer worker commits the batch. Belfry returns:
 
 Rejected requests are counted and persisted as bounded ingestion diagnostics
 when the store is available.
+
+The Store uses SQLite WAL with `synchronous=NORMAL`. A committed transaction is
+recoverable after an ordinary process crash, but the newest transaction may be
+lost after an operating-system crash or power loss. That tradeoff is deliberate
+for a local development tool and is not a production durability guarantee.
 
 ## Recommended SDK configuration
 

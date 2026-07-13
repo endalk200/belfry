@@ -15,23 +15,6 @@ them separately.
 
 ## Normal Release
 
-## First Belfry Release From This Repository
-
-The first automated release from this repository is `0.0.1`, and the versioned
-files are already part of the migration PR:
-
-- `apps/cli/package.json`
-- `apps/cli/CHANGELOG.md`
-- `apps/cli/src/version.generated.ts`
-
-For this first release, merge the migration PR directly after required checks
-pass. The `Stage npm Release` workflow should stage `@belfry/cli@0.0.1`
-after `npm-production` environment approval. Do not wait for a separate
-Changesets release PR unless a later change adds new changesets on `main`.
-
-After `0.0.1` is released, use the normal Changesets flow below for future
-versions.
-
 ### 1. Open the change PR
 
 Create a pull request into `main`.
@@ -141,8 +124,9 @@ Before approving, verify:
 - Version matches the release PR
 - Provenance is present
 - Commit matches the merged release PR commit
-- Package contents are expected: `dist/bin.js`, `LICENSE`, `package.json`,
-  `README.md`
+- Package contents are expected: CLI and worker bundles, browser assets,
+  `dist/SBOM.cdx.json`, third-party license texts, `LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, `package.json`, and `README.md`
 
 After npm approval, the package is public on the configured dist-tag, currently
 `latest`.

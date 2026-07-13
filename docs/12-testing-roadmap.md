@@ -13,7 +13,7 @@
   last-write-wins projections, FTS, correlation, facets, timestamp fallback,
   bounded retention, and persisted retention-failure health/diagnostics.
 - Ingestion tests use real workers for queue bounds, bounded rejection
-  diagnostics, content/encoding errors, gzip, protobuf/JSON decode, durable
+  diagnostics, content/encoding errors, gzip, protobuf/JSON decode, committed
   acknowledgement, write latency, and post-start worker-crash readiness.
 - Daemon tests bind real loopback listeners for lifecycle ownership, graceful
   drain, routes, web assets, docs, and OpenAPI.

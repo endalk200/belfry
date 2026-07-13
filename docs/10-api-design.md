@@ -8,10 +8,10 @@ encoding, tagged errors, the typed client, and generated OpenAPI.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | Liveness, readiness, queue, and store size |
+| `GET` | `/api/health` | Liveness, readiness, queue, and live/file/WAL sizes |
 | `GET` | `/api/services` | Bounded Service inventory for a range |
 | `POST` | `/api/traces/search` | Filtered, paginated trace summaries |
-| `GET` | `/api/traces/:traceId` | Complete trace and correlated log summaries |
+| `GET` | `/api/traces/:traceId` | Trace summary and bounded span details |
 | `GET` | `/api/traces/:traceId/logs` | Logs correlated to a trace |
 | `GET` | `/api/traces/:traceId/spans/:spanId` | Complete span |
 | `POST` | `/api/logs/search` | Filtered, paginated log summaries |
@@ -49,3 +49,7 @@ cursor by design. Service inventory and ingestion diagnostics use the same
 contract rather than returning an unpageable array.
 Trace-correlated log responses use the same envelope and oldest-first signed
 cursor pagination rather than silently truncating an in-memory list.
+Trace detail returns at most the configured query-result ceiling and marks
+`spansTruncated` when more spans exist. Direct span lookup remains available for
+spans outside that bounded detail response. Correlated logs are always loaded
+through their paginated endpoint rather than embedded without a bound.
