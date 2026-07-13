@@ -64,6 +64,7 @@ describe("@belfry/config", () => {
 			assert.strictEqual(config.storage.retentionMaxBytes, DEFAULT_RETENTION_MAX_BYTES);
 			assert.strictEqual(config.storage.retentionMaxAgeNs, 604_800_000_000_000n);
 			assert.strictEqual(config.ingestion.maxCompressedBytes < config.ingestion.maxDecompressedBytes, true);
+			assert.strictEqual(config.ingestion.writerTimeoutMs, 30_000);
 			assert.strictEqual(config.query.maxResults, 500);
 		}).pipe(Effect.provide(fileSystemLayer({}))),
 	);
@@ -100,6 +101,45 @@ queue_byte_capacity = 4096
 
 			assert.strictEqual(invalid._tag, "InvalidBelfryConfiguration");
 			if (invalid._tag === "InvalidBelfryConfiguration") assert.strictEqual(invalid.path, "ingestion.queue");
+		}),
+	);
+
+	it.effect("rejects unknown TOML sections and keys with a useful suggestion", () =>
+		Effect.gen(function* () {
+			for (const [contents, path, suggestion] of [
+				["[storge]\nretention_days = 1\n", "storge", "storage"],
+				["[storage]\nretention_dayz = 1\n", "storage.retention_dayz", "storage.retention_days"],
+				["[daemon]\ntypo = true\n", "daemon.typo", "daemon."],
+			] as const) {
+				const configPath = `/tmp/belfry-unknown-${path.replaceAll(".", "-")}.toml`;
+				const invalid = yield* Effect.flip(
+					loadBelfryConfigFromEnvironment({ [CONFIG_PATH_ENV]: configPath }).pipe(
+						Effect.provide(fileSystemLayer({ [configPath]: contents })),
+					),
+				);
+				assert.strictEqual(invalid._tag, "InvalidBelfryConfiguration");
+				if (invalid._tag !== "InvalidBelfryConfiguration") continue;
+				assert.strictEqual(invalid.path, path);
+				assert.include(invalid.expected, suggestion);
+			}
+		}),
+	);
+
+	it.effect("rejects non-finite TOML numbers as typed configuration failures", () =>
+		Effect.gen(function* () {
+			for (const [name, contents] of [
+				["retention-inf", "[storage]\nretention_days = inf\n"],
+				["lookback-negative-inf", "[query]\nmax_lookback_days = -inf\n"],
+				["timeout-nan", "[ingestion]\nwriter_timeout_ms = nan\n"],
+			] as const) {
+				const configPath = `/tmp/belfry-${name}.toml`;
+				const invalid = yield* Effect.flip(
+					loadBelfryConfigFromEnvironment({ [CONFIG_PATH_ENV]: configPath }).pipe(
+						Effect.provide(fileSystemLayer({ [configPath]: contents })),
+					),
+				);
+				assert.strictEqual(invalid._tag, "ConfigError");
+			}
 		}),
 	);
 
@@ -233,6 +273,7 @@ default_range_minutes = 15
 				["storage.indexed_key_limit", "[storage]\nindexed_key_limit = 0\n"],
 				["storage.indexed_values_per_key_limit", "[storage]\nindexed_values_per_key_limit = 0\n"],
 				["ingestion.drain_timeout_ms", "[ingestion]\ndrain_timeout_ms = 0\n"],
+				["ingestion.writer_timeout_ms", "[ingestion]\nwriter_timeout_ms = 99\n"],
 				["query.max_results", "[query]\nmax_results = 99\n"],
 				["query.timeout_ms", "[query]\ntimeout_ms = 0\n"],
 			] as const;

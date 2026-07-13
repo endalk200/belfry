@@ -1,10 +1,10 @@
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Result } from "effect";
+import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Result, Schema } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import * as Toml from "toml";
 
-export const DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318";
+export const DEFAULT_OTLP_HTTP_ENDPOINT = "http://127.0.0.1:4318";
 export const DEFAULT_CONFIG_PATH = "~/.belfry/config.toml";
 export const CONFIG_PATH_ENV = "BELFRY_CONFIG_PATH";
 export const TELEMETRY_ENV = "BELFRY_TELEMETRY";
@@ -57,6 +57,7 @@ export type IngestionConfig = {
 	readonly maxDecompressedBytes: number;
 	readonly queueRequestCapacity: number;
 	readonly queueByteCapacity: number;
+	readonly writerTimeoutMs: number;
 	readonly drainTimeoutMs: number;
 };
 
@@ -111,6 +112,7 @@ export const defaultBelfryConfiguration: BelfryConfiguration = {
 		maxDecompressedBytes: 32 * 1_024 * 1_024,
 		queueRequestCapacity: 64,
 		queueByteCapacity: 64 * 1_024 * 1_024,
+		writerTimeoutMs: 30_000,
 		drainTimeoutMs: 10_000,
 	},
 	query: {
@@ -218,7 +220,10 @@ type ConfigFileSource = ConfigSourceProvider & {
 
 type ResolvedConfigSources = {
 	readonly path: ConfigPathResolution;
-	readonly file: Result.Result<ConfigFileSource, ConfigFileParseError | ExplicitConfigFileNotFound>;
+	readonly file: Result.Result<
+		ConfigFileSource,
+		ConfigFileParseError | ExplicitConfigFileNotFound | InvalidBelfryConfiguration
+	>;
 	readonly env: Result.Result<
 		ConfigSourceProvider,
 		InvalidBelfryEnvironment | InvalidTelemetryEndpoint | InvalidTelemetryEnvironment
@@ -226,6 +231,31 @@ type ResolvedConfigSources = {
 };
 
 const normalizeUrl = (url: URL): string => url.toString().replace(/\/$/, "");
+const DaysSchema = Schema.Finite.check(Schema.isBetween({ minimum: 0.000_001, maximum: 3_650 }));
+const configFileKeys = {
+	telemetry: ["enabled", "otlp_endpoint"],
+	daemon: ["host", "port", "state_directory", "startup_timeout_ms", "shutdown_timeout_ms"],
+	storage: [
+		"database_path",
+		"retention_days",
+		"retention_max_bytes",
+		"retention_batch_size",
+		"indexed_attribute_limit",
+		"indexed_value_max_bytes",
+		"indexed_key_limit",
+		"indexed_values_per_key_limit",
+	],
+	ingestion: [
+		"max_compressed_bytes",
+		"max_decompressed_bytes",
+		"queue_request_capacity",
+		"queue_byte_capacity",
+		"writer_timeout_ms",
+		"drain_timeout_ms",
+	],
+	query: ["max_lookback_days", "max_results", "timeout_ms"],
+	interfaces: ["refresh_interval_ms", "default_range_minutes", "web_open_browser"],
+} as const;
 
 export const telemetryConfigDescriptor = Config.all({
 	enabled: Config.boolean("enabled").pipe(Config.withDefault(defaultBelfryConfiguration.telemetry.enabled)),
@@ -243,70 +273,71 @@ export const telemetryConfigDescriptor = Config.all({
 
 const daemonConfigDescriptor = Config.all({
 	host: Config.string("host").pipe(Config.withDefault(defaultBelfryConfiguration.daemon.host)),
-	port: Config.number("port").pipe(Config.withDefault(defaultBelfryConfiguration.daemon.port)),
+	port: Config.int("port").pipe(Config.withDefault(defaultBelfryConfiguration.daemon.port)),
 	stateDirectory: Config.string("state_directory").pipe(
 		Config.withDefault(defaultBelfryConfiguration.daemon.stateDirectory),
 	),
-	startupTimeoutMs: Config.number("startup_timeout_ms").pipe(
+	startupTimeoutMs: Config.int("startup_timeout_ms").pipe(
 		Config.withDefault(defaultBelfryConfiguration.daemon.startupTimeoutMs),
 	),
-	shutdownTimeoutMs: Config.number("shutdown_timeout_ms").pipe(
+	shutdownTimeoutMs: Config.int("shutdown_timeout_ms").pipe(
 		Config.withDefault(defaultBelfryConfiguration.daemon.shutdownTimeoutMs),
 	),
 }).pipe(Config.nested("daemon"));
 
 const storageConfigDescriptor = Config.all({
 	databasePath: Config.string("database_path").pipe(Config.withDefault("")),
-	retentionDays: Config.number("retention_days").pipe(Config.withDefault(7)),
-	retentionMaxBytes: Config.number("retention_max_bytes").pipe(
-		Config.withDefault(Number(DEFAULT_RETENTION_MAX_BYTES)),
-	),
-	retentionBatchSize: Config.number("retention_batch_size").pipe(
+	retentionDays: Config.schema(DaysSchema, "retention_days").pipe(Config.withDefault(7)),
+	retentionMaxBytes: Config.int("retention_max_bytes").pipe(Config.withDefault(Number(DEFAULT_RETENTION_MAX_BYTES))),
+	retentionBatchSize: Config.int("retention_batch_size").pipe(
 		Config.withDefault(defaultBelfryConfiguration.storage.retentionBatchSize),
 	),
-	indexedAttributeLimit: Config.number("indexed_attribute_limit").pipe(
+	indexedAttributeLimit: Config.int("indexed_attribute_limit").pipe(
 		Config.withDefault(defaultBelfryConfiguration.storage.indexedAttributeLimit),
 	),
-	indexedValueMaxBytes: Config.number("indexed_value_max_bytes").pipe(
+	indexedValueMaxBytes: Config.int("indexed_value_max_bytes").pipe(
 		Config.withDefault(defaultBelfryConfiguration.storage.indexedValueMaxBytes),
 	),
-	indexedKeyLimit: Config.number("indexed_key_limit").pipe(
+	indexedKeyLimit: Config.int("indexed_key_limit").pipe(
 		Config.withDefault(defaultBelfryConfiguration.storage.indexedKeyLimit),
 	),
-	indexedValuesPerKeyLimit: Config.number("indexed_values_per_key_limit").pipe(
+	indexedValuesPerKeyLimit: Config.int("indexed_values_per_key_limit").pipe(
 		Config.withDefault(defaultBelfryConfiguration.storage.indexedValuesPerKeyLimit),
 	),
 }).pipe(Config.nested("storage"));
 
 const ingestionConfigDescriptor = Config.all({
-	maxCompressedBytes: Config.number("max_compressed_bytes").pipe(
+	maxCompressedBytes: Config.int("max_compressed_bytes").pipe(
 		Config.withDefault(defaultBelfryConfiguration.ingestion.maxCompressedBytes),
 	),
-	maxDecompressedBytes: Config.number("max_decompressed_bytes").pipe(
+	maxDecompressedBytes: Config.int("max_decompressed_bytes").pipe(
 		Config.withDefault(defaultBelfryConfiguration.ingestion.maxDecompressedBytes),
 	),
-	queueRequestCapacity: Config.number("queue_request_capacity").pipe(
+	queueRequestCapacity: Config.int("queue_request_capacity").pipe(
 		Config.withDefault(defaultBelfryConfiguration.ingestion.queueRequestCapacity),
 	),
-	queueByteCapacity: Config.number("queue_byte_capacity").pipe(
+	queueByteCapacity: Config.int("queue_byte_capacity").pipe(
 		Config.withDefault(defaultBelfryConfiguration.ingestion.queueByteCapacity),
 	),
-	drainTimeoutMs: Config.number("drain_timeout_ms").pipe(
+	writerTimeoutMs: Config.int("writer_timeout_ms").pipe(
+		Config.withDefault(defaultBelfryConfiguration.ingestion.writerTimeoutMs),
+	),
+	drainTimeoutMs: Config.int("drain_timeout_ms").pipe(
 		Config.withDefault(defaultBelfryConfiguration.ingestion.drainTimeoutMs),
 	),
 }).pipe(Config.nested("ingestion"));
 
 const queryConfigDescriptor = Config.all({
-	maxLookbackDays: Config.number("max_lookback_days").pipe(Config.withDefault(7)),
-	maxResults: Config.number("max_results").pipe(Config.withDefault(defaultBelfryConfiguration.query.maxResults)),
-	timeoutMs: Config.number("timeout_ms").pipe(Config.withDefault(defaultBelfryConfiguration.query.timeoutMs)),
+	maxLookbackDays: Config.schema(DaysSchema, "max_lookback_days").pipe(Config.withDefault(7)),
+	maxResults: Config.int("max_results").pipe(Config.withDefault(defaultBelfryConfiguration.query.maxResults)),
+	timeoutMs: Config.int("timeout_ms").pipe(Config.withDefault(defaultBelfryConfiguration.query.timeoutMs)),
 }).pipe(Config.nested("query"));
 
 const interfaceConfigDescriptor = Config.all({
-	refreshIntervalMs: Config.number("refresh_interval_ms").pipe(
+	refreshIntervalMs: Config.int("refresh_interval_ms").pipe(
 		Config.withDefault(defaultBelfryConfiguration.interfaces.refreshIntervalMs),
 	),
-	defaultRangeMinutes: Config.number("default_range_minutes").pipe(
+	defaultRangeMinutes: Config.int("default_range_minutes").pipe(
 		Config.withDefault(defaultBelfryConfiguration.interfaces.defaultRangeMinutes),
 	),
 	webOpenBrowser: Config.boolean("web_open_browser").pipe(
@@ -350,6 +381,7 @@ export const belfryConfigDescriptor = Config.all({
 				maxDecompressedBytes: Math.trunc(ingestion.maxDecompressedBytes),
 				queueRequestCapacity: Math.trunc(ingestion.queueRequestCapacity),
 				queueByteCapacity: Math.trunc(ingestion.queueByteCapacity),
+				writerTimeoutMs: Math.trunc(ingestion.writerTimeoutMs),
 				drainTimeoutMs: Math.trunc(ingestion.drainTimeoutMs),
 			},
 			query: {
@@ -379,34 +411,35 @@ otlp_endpoint = "${DEFAULT_OTLP_HTTP_ENDPOINT}"
 [daemon]
 host = "${DEFAULT_DAEMON_HOST}"
 port = ${DEFAULT_DAEMON_PORT}
-startup_timeout_ms = 5000
-shutdown_timeout_ms = 10000
+startup_timeout_ms = ${defaultBelfryConfiguration.daemon.startupTimeoutMs}
+shutdown_timeout_ms = ${defaultBelfryConfiguration.daemon.shutdownTimeoutMs}
 
 [storage]
-retention_days = 7
-retention_max_bytes = ${DEFAULT_RETENTION_MAX_BYTES}
-retention_batch_size = 1000
-indexed_attribute_limit = 64
-indexed_value_max_bytes = 512
-indexed_key_limit = 256
-indexed_values_per_key_limit = 1024
+retention_days = ${Number(defaultBelfryConfiguration.storage.retentionMaxAgeNs) / 86_400_000_000_000}
+retention_max_bytes = ${defaultBelfryConfiguration.storage.retentionMaxBytes}
+retention_batch_size = ${defaultBelfryConfiguration.storage.retentionBatchSize}
+indexed_attribute_limit = ${defaultBelfryConfiguration.storage.indexedAttributeLimit}
+indexed_value_max_bytes = ${defaultBelfryConfiguration.storage.indexedValueMaxBytes}
+indexed_key_limit = ${defaultBelfryConfiguration.storage.indexedKeyLimit}
+indexed_values_per_key_limit = ${defaultBelfryConfiguration.storage.indexedValuesPerKeyLimit}
 
 [ingestion]
-max_compressed_bytes = 8388608
-max_decompressed_bytes = 33554432
-queue_request_capacity = 64
-queue_byte_capacity = 67108864
-drain_timeout_ms = 10000
+max_compressed_bytes = ${defaultBelfryConfiguration.ingestion.maxCompressedBytes}
+max_decompressed_bytes = ${defaultBelfryConfiguration.ingestion.maxDecompressedBytes}
+queue_request_capacity = ${defaultBelfryConfiguration.ingestion.queueRequestCapacity}
+queue_byte_capacity = ${defaultBelfryConfiguration.ingestion.queueByteCapacity}
+writer_timeout_ms = ${defaultBelfryConfiguration.ingestion.writerTimeoutMs}
+drain_timeout_ms = ${defaultBelfryConfiguration.ingestion.drainTimeoutMs}
 
 [query]
-max_lookback_days = 7
-max_results = 500
-timeout_ms = 2000
+max_lookback_days = ${Number(defaultBelfryConfiguration.query.maxLookbackNs) / 86_400_000_000_000}
+max_results = ${defaultBelfryConfiguration.query.maxResults}
+timeout_ms = ${defaultBelfryConfiguration.query.timeoutMs}
 
 [interfaces]
-refresh_interval_ms = 2000
-default_range_minutes = 15
-web_open_browser = true
+refresh_interval_ms = ${defaultBelfryConfiguration.interfaces.refreshIntervalMs}
+default_range_minutes = ${defaultBelfryConfiguration.interfaces.defaultRangeMinutes}
+web_open_browser = ${defaultBelfryConfiguration.interfaces.webOpenBrowser}
 `;
 
 const normalizeUrlString = (value: string) =>
@@ -620,9 +653,89 @@ const makeConfigFileWriteError = (path: string, cause: unknown) =>
 		cause,
 	});
 
+const validateConfigFileShape = (value: unknown): Effect.Effect<void, InvalidBelfryConfiguration> =>
+	Effect.suspend(() => {
+		if (!isRecord(value)) {
+			return Effect.fail(
+				new InvalidBelfryConfiguration({
+					path: "config",
+					value: String(value),
+					expected: "a TOML document containing supported Belfry sections",
+				}),
+			);
+		}
+		for (const [sectionName, sectionValue] of Object.entries(value)) {
+			if (!Object.hasOwn(configFileKeys, sectionName)) {
+				return Effect.fail(unknownConfigKey(sectionName, sectionName, Object.keys(configFileKeys)));
+			}
+			if (!isRecord(sectionValue)) continue;
+			const section = sectionName as keyof typeof configFileKeys;
+			const allowedKeys = configFileKeys[section] as ReadonlyArray<string>;
+			for (const key of Object.keys(sectionValue)) {
+				if (!allowedKeys.includes(key)) {
+					return Effect.fail(unknownConfigKey(`${sectionName}.${key}`, key, allowedKeys, `${sectionName}.`));
+				}
+			}
+		}
+		return Effect.void;
+	});
+
+const unknownConfigKey = (
+	path: string,
+	key: string,
+	candidates: ReadonlyArray<string>,
+	prefix = "",
+): InvalidBelfryConfiguration => {
+	const suggestion = nearestKey(key, candidates);
+	return new InvalidBelfryConfiguration({
+		path,
+		value: "unknown setting",
+		expected:
+			suggestion === undefined
+				? "a supported Belfry configuration setting"
+				: `a supported Belfry configuration setting; did you mean ${prefix}${suggestion}?`,
+	});
+};
+
+const nearestKey = (value: string, candidates: ReadonlyArray<string>): string | undefined => {
+	let nearest: string | undefined;
+	let distance = Number.POSITIVE_INFINITY;
+	for (const candidate of candidates) {
+		const candidateDistance = editDistance(value, candidate);
+		if (candidateDistance < distance) {
+			nearest = candidate;
+			distance = candidateDistance;
+		}
+	}
+	return nearest;
+};
+
+const editDistance = (left: string, right: string): number => {
+	let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+	for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+		const current = [leftIndex];
+		for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+			current[rightIndex] = Math.min(
+				(current[rightIndex - 1] ?? 0) + 1,
+				(previous[rightIndex] ?? 0) + 1,
+				(previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+			);
+		}
+		previous = current;
+	}
+	return previous[right.length] ?? 0;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
 const loadFileProvider = (
 	path: ConfigPathResolution,
-): Effect.Effect<ConfigFileSource, ConfigFileParseError | ExplicitConfigFileNotFound, FileSystem.FileSystem> =>
+): Effect.Effect<
+	ConfigFileSource,
+	ConfigFileParseError | ExplicitConfigFileNotFound | InvalidBelfryConfiguration,
+	FileSystem.FileSystem
+> =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const exists = yield* fs.exists(path.path).pipe(
@@ -672,6 +785,7 @@ const loadFileProvider = (
 					cause,
 				}),
 		});
+		yield* validateConfigFileShape(parsed);
 
 		yield* Effect.annotateCurrentSpan({
 			"belfry.config.file_presence": "present",
@@ -887,6 +1001,13 @@ const validateEffectiveConfiguration = (
 			"ingestion.drain_timeout_ms",
 			config.ingestion.drainTimeoutMs,
 			"an integer from 1 through 3600000 milliseconds",
+		);
+	}
+	if (!isIntegerBetween(config.ingestion.writerTimeoutMs, 100, 3_600_000)) {
+		return invalid(
+			"ingestion.writer_timeout_ms",
+			config.ingestion.writerTimeoutMs,
+			"an integer from 100 through 3600000 milliseconds",
 		);
 	}
 	if (
