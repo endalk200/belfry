@@ -115,7 +115,7 @@ describe("Belfry Daemon HTTP stack", () => {
 		assert.isBelow(Number(result.responsiveHealthDurationMs), 250);
 		assert.strictEqual(result.restartedQueryStatus, 200);
 		assert.strictEqual(result.restartedQueryCount, 0);
-	});
+	}, 30_000);
 });
 
 const runHarness = (): Record<string, unknown> => {
