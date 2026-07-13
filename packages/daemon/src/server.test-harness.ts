@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +38,7 @@ const configuration: BelfryConfiguration = {
 		maxDecompressedBytes: 32_768,
 	},
 };
+writeFileSync(configuration.query.cursorSecretPath, Uint8Array.of(1, 2, 3), { mode: 0o600 });
 const degradedStateDirectory = mkdtempSync(join(tmpdir(), "belfry-daemon-degraded-"));
 const degradedDatabasePath = join(degradedStateDirectory, "telemetry.db");
 mkdirSync(degradedDatabasePath);
@@ -120,7 +121,10 @@ const result = await Effect.runPromise(
 			const otlpResponse = yield* Effect.promise(() =>
 				fetch(`${daemon.endpoint}/v1/traces`, {
 					method: "POST",
-					headers: { "content-type": "application/json; charset=utf-8" },
+					headers: {
+						"content-type": "application/json; charset=utf-8",
+						origin: "http://127.0.0.1:3000",
+					},
 					body: JSON.stringify(tracePayload()),
 				}),
 			);
@@ -134,6 +138,18 @@ const result = await Effect.runPromise(
 						"access-control-request-headers": "content-type,content-encoding",
 					},
 				}),
+			);
+			const foreignOrigin = yield* Effect.promise(() =>
+				fetch(`${daemon.endpoint}/v1/traces`, {
+					method: "OPTIONS",
+					headers: {
+						origin: "https://example.com",
+						"access-control-request-method": "POST",
+					},
+				}),
+			);
+			const foreignHost = yield* Effect.promise(() =>
+				fetch(`${daemon.endpoint}/api/health`, { headers: { host: "example.com" } }),
 			);
 			const logOtlpResponse = yield* Effect.promise(() =>
 				fetch(`${daemon.endpoint}/v1/logs`, {
@@ -237,14 +253,14 @@ const result = await Effect.runPromise(
 			const oversized = yield* Effect.promise(() =>
 				fetch(`${daemon.endpoint}/v1/logs`, {
 					method: "POST",
-					headers: { "content-type": "application/json" },
+					headers: { "content-type": "application/json", connection: "close" },
 					body: new Uint8Array(8_193),
 				}),
 			);
 			const chunkedOversized = yield* Effect.promise(() =>
 				fetch(`${daemon.endpoint}/v1/logs`, {
 					method: "POST",
-					headers: { "content-type": "application/json" },
+					headers: { "content-type": "application/json", connection: "close" },
 					body: new ReadableStream<Uint8Array>({
 						start(controller) {
 							controller.enqueue(new Uint8Array(4_097));
@@ -254,14 +270,22 @@ const result = await Effect.runPromise(
 					}),
 				}),
 			);
-			const ingestionStats = (yield* Effect.promise(() =>
-				fetch(`${daemon.endpoint}/api/ingestion/stats`).then((response) => response.json()),
-			)) as {
+			// Rejection diagnostics are persisted asynchronously so error responses stay fast under load.
+			yield* Effect.sleep(50);
+			const ingestionStatsResponse = yield* Effect.promise(() => fetch(`${daemon.endpoint}/api/ingestion/stats`));
+			const ingestionStatsBody = yield* Effect.promise(() => ingestionStatsResponse.text());
+			if (ingestionStatsBody === "") {
+				throw new Error(`Ingestion stats returned ${ingestionStatsResponse.status} with an empty body.`);
+			}
+			const ingestionStats = JSON.parse(ingestionStatsBody) as {
 				rejectedRequests: string;
 				decodeErrors: string;
 				droppedDiagnostics: string;
 				writeLatencyP95Ms: number;
 			};
+			if (ingestionStats === null) {
+				throw new Error(`Ingestion stats returned ${ingestionStatsResponse.status}: ${ingestionStatsBody}`);
+			}
 			const diagnosticToNs = BigInt(Date.now()) * 1_000_000n;
 			const diagnosticFromNs = diagnosticToNs - 60_000_000_000n;
 			const diagnostics = (yield* Effect.promise(() =>
@@ -286,6 +310,28 @@ const result = await Effect.runPromise(
 			};
 			const removedDocs = yield* Effect.promise(() => fetch(`${daemon.endpoint}/docs/belfry-debug`));
 			const removedDocsApi = yield* Effect.promise(() => fetch(`${daemon.endpoint}/api/docs`));
+			// Bun closes over-limit request bodies at the adapter boundary. Keep these last for this
+			// endpoint so a pooled test connection cannot obscure unrelated response assertions.
+			const oversizedQuery = yield* Effect.promise(() =>
+				fetch(`${daemon.endpoint}/api/traces/search`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: new Uint8Array(1_048_577),
+				}),
+			);
+			const chunkedOversizedQuery = yield* Effect.promise(() =>
+				fetch(`${daemon.endpoint}/api/traces/search`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(new Uint8Array(524_289));
+							controller.enqueue(new Uint8Array(524_288));
+							controller.close();
+						},
+					}),
+				}),
+			);
 			const degradedDaemon = yield* startDaemonServer({ configuration: degradedConfiguration });
 			const degradedHealthResponse = yield* Effect.promise(() => fetch(`${degradedDaemon.endpoint}/api/health`));
 			const degradedHealth = (yield* Effect.promise(() => degradedHealthResponse.json())) as {
@@ -372,11 +418,14 @@ const result = await Effect.runPromise(
 					}),
 				}),
 			);
-			const restartedQueryBody = (yield* Effect.promise(() => restartedQuery.json())) as { code: string };
+			const restartedQueryBody = (yield* Effect.promise(() => restartedQuery.json())) as {
+				items: ReadonlyArray<unknown>;
+			};
 
 			return {
 				host: daemon.host,
 				webStatus: webRoot.status,
+				cursorSecretBytes: readFileSync(configuration.query.cursorSecretPath).byteLength,
 				webHasWorkbench: webRootBody.includes("Belfry · Local observability"),
 				webHasInterfacePreferences:
 					webRootBody.includes("data-refresh-interval-ms=") &&
@@ -390,8 +439,12 @@ const result = await Effect.runPromise(
 				otlpStatus: otlpResponse.status,
 				otlpCorsOrigin: otlpResponse.headers.get("access-control-allow-origin"),
 				otlpPreflightStatus: otlpPreflight.status,
+				otlpPreflightOrigin: otlpPreflight.headers.get("access-control-allow-origin"),
 				otlpPreflightMethods: otlpPreflight.headers.get("access-control-allow-methods"),
 				otlpPreflightHeaders: otlpPreflight.headers.get("access-control-allow-headers"),
+				foreignOriginStatus: foreignOrigin.status,
+				foreignOriginCors: foreignOrigin.headers.get("access-control-allow-origin"),
+				foreignHostStatus: foreignHost.status,
 				logOtlpStatus: logOtlpResponse.status,
 				otlpBody,
 				traceCount: tracePage.items.length,
@@ -412,6 +465,8 @@ const result = await Effect.runPromise(
 				otherSpanTraceLogCount: otherSpanTraceLogs.items.length,
 				configuredLimitStatus: configuredLimit.status,
 				configuredLookbackStatus: configuredLookback.status,
+				oversizedQueryStatus: oversizedQuery.status,
+				chunkedOversizedQueryStatus: chunkedOversizedQuery.status,
 				invertedServicesRangeStatus: invertedServicesRange.status,
 				malformedStatus: malformed.status,
 				malformedCorsOrigin: malformed.headers.get("access-control-allow-origin"),
@@ -452,7 +507,7 @@ const result = await Effect.runPromise(
 				responsiveHealthStatus: responsiveHealth.status,
 				responsiveHealthDurationMs,
 				restartedQueryStatus: restartedQuery.status,
-				restartedQueryCode: restartedQueryBody.code,
+				restartedQueryCount: restartedQueryBody.items.length,
 			};
 		}),
 	),

@@ -16,7 +16,28 @@ import {
 } from "@belfry/ingestion";
 import { Effect, Stream } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
-import type { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+import {
+	HttpServerRequest as CurrentHttpServerRequest,
+	type HttpServerRequest,
+} from "effect/unstable/http/HttpServerRequest";
+
+export const localOnlyNetworkBoundary = HttpRouter.middleware(
+	(httpEffect) =>
+		Effect.flatMap(CurrentHttpServerRequest, (request) => {
+			const host = request.headers.host;
+			const origin = request.headers.origin;
+			if (!isLoopbackHostHeader(host) || (origin !== undefined && !isLoopbackOrigin(origin))) {
+				return Effect.succeed(
+					HttpServerResponse.text("Belfry only accepts requests from this machine.", {
+						status: 403,
+						headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+					}),
+				);
+			}
+			return httpEffect;
+		}),
+	{ global: true },
+);
 
 export const makeOtlpRoutes = (admission: IngestionAdmissionService, maxCompressedBytes: number) =>
 	HttpRouter.addAll([
@@ -26,8 +47,12 @@ export const makeOtlpRoutes = (admission: IngestionAdmissionService, maxCompress
 		HttpRouter.route("POST", "/v1/logs", (request) =>
 			handleOtlpRequest(request, "logs", admission, maxCompressedBytes),
 		),
-		HttpRouter.route("OPTIONS", "/v1/traces", HttpServerResponse.empty({ status: 204, headers: otlpCorsHeaders })),
-		HttpRouter.route("OPTIONS", "/v1/logs", HttpServerResponse.empty({ status: 204, headers: otlpCorsHeaders })),
+		HttpRouter.route("OPTIONS", "/v1/traces", (request) =>
+			Effect.succeed(HttpServerResponse.empty({ status: 204, headers: otlpCorsHeaders(request) })),
+		),
+		HttpRouter.route("OPTIONS", "/v1/logs", (request) =>
+			Effect.succeed(HttpServerResponse.empty({ status: 204, headers: otlpCorsHeaders(request) })),
+		),
 	]);
 
 export type WebInterfacePreferences = {
@@ -161,6 +186,7 @@ const handleOtlpRequest = (
 			.pipe(
 				Effect.as(
 					otlpErrorResponse(
+						request,
 						contentType,
 						new IngestionPayloadTooLarge({
 							stage: "compressed",
@@ -194,13 +220,14 @@ const handleOtlpRequest = (
 				return HttpServerResponse.uint8Array(response.body, {
 					status: 200,
 					contentType: response.contentType,
-					headers: otlpCorsHeaders,
+					headers: otlpCorsHeaders(request),
 				});
 			}),
 			Effect.catch((error) => {
 				const response = isIngestionError(error)
-					? otlpErrorResponse(contentType, error)
+					? otlpErrorResponse(request, contentType, error)
 					: otlpErrorResponse(
+							request,
 							contentType,
 							new IngestionUnavailable({
 								code: "writer_unavailable",
@@ -255,7 +282,7 @@ const concatenateBytes = (chunks: ReadonlyArray<Uint8Array>, length: number): Ui
 	return result;
 };
 
-const otlpErrorResponse = (contentType: string, error: IngestionError) => {
+const otlpErrorResponse = (request: HttpServerRequest, contentType: string, error: IngestionError) => {
 	const status =
 		error instanceof IngestionInvalidPayload
 			? 400
@@ -268,19 +295,49 @@ const otlpErrorResponse = (contentType: string, error: IngestionError) => {
 						: 503;
 	const rpcCode = status === 400 ? 3 : status === 413 || status === 429 ? 8 : status === 415 ? 12 : 14;
 	const response = makeOtlpErrorResponse(contentType, rpcCode, error.message);
+	const headers = otlpCorsHeaders(request);
 	return HttpServerResponse.uint8Array(response.body, {
 		status,
 		contentType: response.contentType,
-		headers: status === 429 ? { ...otlpCorsHeaders, "retry-after": "1" } : otlpCorsHeaders,
+		headers:
+			status === 413
+				? { ...headers, connection: "close" }
+				: status === 429
+					? { ...headers, "retry-after": "1" }
+					: headers,
 	});
 };
 
-const otlpCorsHeaders = {
-	"access-control-allow-origin": "*",
-	"access-control-allow-methods": "POST, OPTIONS",
-	"access-control-allow-headers": "content-type, content-encoding",
-	"access-control-max-age": "600",
-} as const;
+const otlpCorsHeaders = (request: HttpServerRequest) => {
+	const origin = request.headers.origin;
+	return {
+		...(origin === undefined ? {} : { "access-control-allow-origin": origin, vary: "Origin" }),
+		"access-control-allow-methods": "POST, OPTIONS",
+		"access-control-allow-headers": "content-type, content-encoding",
+		"access-control-max-age": "600",
+	} as const;
+};
+
+const isLoopbackHostHeader = (host: string | undefined): boolean => {
+	if (host === undefined) return false;
+	const match = /^(?:localhost|127\.0\.0\.1)(?::\d{1,5})?$|^\[::1\](?::\d{1,5})?$/u.exec(host);
+	if (match === null) return false;
+	const port = host.match(/:(\d+)$/u)?.[1];
+	return port === undefined || Number(port) <= 65_535;
+};
+
+const isLoopbackOrigin = (origin: string): boolean => {
+	try {
+		const parsed = new URL(origin);
+		return (
+			(parsed.protocol === "http:" || parsed.protocol === "https:") &&
+			parsed.origin === origin &&
+			(parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]")
+		);
+	} catch {
+		return false;
+	}
+};
 
 const isIngestionError = (error: unknown): error is IngestionError =>
 	error instanceof IngestionInvalidPayload ||

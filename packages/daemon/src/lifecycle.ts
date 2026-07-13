@@ -1,5 +1,5 @@
 import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { BelfryConfiguration } from "@belfry/config";
 import { HealthSchema } from "@belfry/query-api";
@@ -11,6 +11,7 @@ export const DaemonRegistrySchema = Schema.Struct({
 	startedAt: Schema.Number,
 	nonce: Schema.String,
 	endpoint: Schema.String,
+	serviceVersion: Schema.String,
 });
 export type DaemonRegistry = typeof DaemonRegistrySchema.Type;
 
@@ -56,6 +57,7 @@ export type DaemonManagerService = {
 export type DaemonManagerOptions = {
 	readonly configuration: BelfryConfiguration;
 	readonly command?: ReadonlyArray<string> | undefined;
+	readonly serviceVersion?: string | undefined;
 };
 
 export class DaemonManager extends Context.Service<DaemonManager, DaemonManagerService>()(
@@ -66,9 +68,13 @@ export class DaemonManager extends Context.Service<DaemonManager, DaemonManagerS
 
 export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerService => {
 	const config = options.configuration;
+	const serviceVersion = options.serviceVersion ?? "development";
 	const startupLockPath = `${config.daemon.lockPath}.startup`;
 
-	const status: Effect.Effect<DaemonStatus> = readRegistry(config.daemon.registryPath).pipe(
+	const status: Effect.Effect<DaemonStatus> = readRegistryWithLockFallback(
+		config.daemon.registryPath,
+		config.daemon.lockPath,
+	).pipe(
 		Effect.flatMap((registry) => {
 			if (registry === undefined) {
 				return Effect.succeed<DaemonStatus>({ state: "stopped", message: "Belfry Daemon is stopped." });
@@ -110,7 +116,13 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 				config.daemon.startupTimeoutMs,
 				Effect.gen(function* () {
 					const current = yield* status;
-					if (current.state === "running") return { adopted: true, registry: current.registry };
+					if (current.state === "running" && current.registry.serviceVersion === serviceVersion) {
+						yield* writeRegistry(config.daemon.registryPath, current.registry);
+						return { adopted: true, registry: current.registry };
+					}
+					if (current.state === "running") {
+						yield* terminateDaemon(current.registry);
+					}
 					if (
 						current.state === "unhealthy" &&
 						current.registry !== undefined &&
@@ -166,31 +178,36 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 			),
 		);
 
+	const terminateDaemon = (registry: DaemonRegistry) =>
+		Effect.gen(function* () {
+			if (registry.pid === process.pid) {
+				return yield* Effect.fail(
+					new DaemonLifecycleFailure({
+						code: "identity_mismatch",
+						message: "The foreground Daemon cannot stop itself through its manager.",
+					}),
+				);
+			}
+			yield* Effect.try({
+				try: () => process.kill(registry.pid, "SIGTERM"),
+				catch: (cause) =>
+					new DaemonLifecycleFailure({
+						code: "identity_mismatch",
+						message: `Could not signal verified Daemon ${registry.pid}: ${errorMessage(cause)}`,
+					}),
+			});
+			yield* waitForStopped(registry.pid, config.daemon.shutdownTimeoutMs);
+			yield* removeIfExists(config.daemon.registryPath);
+			yield* removeIfExists(config.daemon.lockPath);
+			return registry;
+		});
+
 	const stop = Effect.gen(function* () {
 		const current = yield* status;
 		if (current.state !== "running") {
 			return yield* Effect.fail(new DaemonLifecycleFailure({ code: "not_running", message: current.message }));
 		}
-		if (current.registry.pid === process.pid) {
-			return yield* Effect.fail(
-				new DaemonLifecycleFailure({
-					code: "identity_mismatch",
-					message: "The foreground Daemon cannot stop itself through its manager.",
-				}),
-			);
-		}
-		yield* Effect.try({
-			try: () => process.kill(current.registry.pid, "SIGTERM"),
-			catch: (cause) =>
-				new DaemonLifecycleFailure({
-					code: "identity_mismatch",
-					message: `Could not signal verified Daemon ${current.registry.pid}: ${errorMessage(cause)}`,
-				}),
-		});
-		yield* waitForStopped(current.registry.pid, config.daemon.shutdownTimeoutMs);
-		yield* removeIfExists(config.daemon.registryPath);
-		yield* removeIfExists(config.daemon.lockPath);
-		return current.registry;
+		return yield* terminateDaemon(current.registry);
 	});
 
 	const restart = stop.pipe(
@@ -204,8 +221,15 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 		yield* ensureStateDirectory(config.daemon.stateDirectory);
 		const daemonLock = yield* acquireDaemonLock(config.daemon.lockPath);
 		yield* Effect.addFinalizer(() => releaseDaemonLock(daemonLock, config.daemon.lockPath));
-		const serverModule = yield* Effect.promise(() => import("./server.js"));
-		const server = yield* serverModule.startDaemonServer({ configuration: config }).pipe(
+		const serverModule = yield* Effect.tryPromise({
+			try: () => import("./server.js"),
+			catch: (cause) =>
+				new DaemonLifecycleFailure({
+					code: "state_unavailable",
+					message: `Could not load the Daemon server runtime: ${errorMessage(cause)}`,
+				}),
+		});
+		const server = yield* serverModule.startDaemonServer({ configuration: config, serviceVersion }).pipe(
 			Effect.mapError(
 				(error) =>
 					new DaemonLifecycleFailure({
@@ -220,6 +244,7 @@ export const makeDaemonManager = (options: DaemonManagerOptions): DaemonManagerS
 			startedAt: server.startedAt,
 			nonce: server.nonce,
 			endpoint: server.endpoint,
+			serviceVersion,
 		};
 		yield* writeRegistry(config.daemon.registryPath, registry);
 		yield* Effect.tryPromise({
@@ -258,6 +283,19 @@ const readRegistry = (path: string): Effect.Effect<DaemonRegistry | undefined, D
 			}),
 	});
 
+const readRegistryWithLockFallback = (
+	registryPath: string,
+	lockPath: string,
+): Effect.Effect<DaemonRegistry | undefined, DaemonLifecycleFailure> =>
+	Effect.gen(function* () {
+		const registry = yield* Effect.result(readRegistry(registryPath));
+		if (registry._tag === "Success" && registry.success !== undefined) return registry.success;
+		const lockRegistry = yield* Effect.result(readRegistry(lockPath));
+		if (lockRegistry._tag === "Success" && lockRegistry.success !== undefined) return lockRegistry.success;
+		if (registry._tag === "Failure") return yield* Effect.fail(registry.failure);
+		return undefined;
+	});
+
 const writeRegistry = (path: string, registry: DaemonRegistry): Effect.Effect<void, DaemonLifecycleFailure> =>
 	Effect.tryPromise({
 		try: async () => {
@@ -274,7 +312,10 @@ const writeRegistry = (path: string, registry: DaemonRegistry): Effect.Effect<vo
 
 const ensureStateDirectory = (path: string): Effect.Effect<void, DaemonLifecycleFailure> =>
 	Effect.tryPromise({
-		try: () => mkdir(path, { recursive: true, mode: 0o700 }).then(() => undefined),
+		try: async () => {
+			await mkdir(path, { recursive: true, mode: 0o700 });
+			await chmod(path, 0o700);
+		},
 		catch: (cause) =>
 			new DaemonLifecycleFailure({
 				code: "state_unavailable",
@@ -293,7 +334,8 @@ const verifyIdentity = (registry: DaemonRegistry): Effect.Effect<void, string> =
 				health.daemon.pid !== registry.pid ||
 				health.daemon.startedAt !== registry.startedAt ||
 				health.daemon.nonce !== registry.nonce ||
-				health.daemon.endpoint !== registry.endpoint
+				health.daemon.endpoint !== registry.endpoint ||
+				health.daemon.serviceVersion !== registry.serviceVersion
 			) {
 				throw new Error("health identity does not match the registry");
 			}
@@ -337,38 +379,34 @@ const waitForRunning = (
 	status: Effect.Effect<DaemonStatus>,
 	timeoutMs: number,
 ): Effect.Effect<DaemonRegistry, DaemonLifecycleFailure> =>
-	Effect.tryPromise({
-		try: async () => {
-			const started = Date.now();
-			while (Date.now() - started < timeoutMs) {
-				const current = await Effect.runPromise(status);
-				if (current.state === "running") return current.registry;
-				await Bun.sleep(40);
-			}
-			throw new Error("timed out waiting for health and a verified registry");
-		},
-		catch: (cause) =>
+	Effect.gen(function* () {
+		const started = Date.now();
+		while (Date.now() - started < timeoutMs) {
+			const current = yield* status;
+			if (current.state === "running") return current.registry;
+			yield* Effect.sleep(40);
+		}
+		return yield* Effect.fail(
 			new DaemonLifecycleFailure({
 				code: "start_timeout",
-				message: `The Daemon did not become healthy within ${timeoutMs} ms: ${errorMessage(cause)}. Run belfry daemon serve for a foreground diagnostic.`,
+				message: `The Daemon did not become healthy within ${timeoutMs} ms. Run belfry daemon serve for a foreground diagnostic.`,
 			}),
+		);
 	});
 
 const waitForStopped = (pid: number, timeoutMs: number): Effect.Effect<void, DaemonLifecycleFailure> =>
-	Effect.tryPromise({
-		try: async () => {
-			const started = Date.now();
-			while (Date.now() - started < timeoutMs) {
-				if (!processExists(pid)) return;
-				await Bun.sleep(40);
-			}
-			throw new Error(`process ${pid} is still running`);
-		},
-		catch: (cause) =>
+	Effect.gen(function* () {
+		const started = Date.now();
+		while (Date.now() - started < timeoutMs) {
+			if (!processExists(pid)) return;
+			yield* Effect.sleep(40);
+		}
+		return yield* Effect.fail(
 			new DaemonLifecycleFailure({
 				code: "stop_timeout",
-				message: `The Daemon did not stop within ${timeoutMs} ms: ${errorMessage(cause)}`,
+				message: `The Daemon did not stop within ${timeoutMs} ms: process ${pid} is still running`,
 			}),
+		);
 	});
 
 const withFileLock = <A, E, R>(
@@ -376,35 +414,65 @@ const withFileLock = <A, E, R>(
 	timeoutMs: number,
 	effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E | DaemonLifecycleFailure, R> =>
-	Effect.acquireUseRelease(
-		acquireStartupLock(path, timeoutMs),
-		() => effect,
-		(handle) => Effect.promise(() => handle.close()).pipe(Effect.ensuring(removeIfExists(path)), Effect.ignore),
+	Effect.scoped(
+		Effect.gen(function* () {
+			yield* Effect.uninterruptibleMask((restore) =>
+				restore(acquireStartupLock(path, timeoutMs)).pipe(
+					Effect.flatMap((handle) =>
+						Effect.addFinalizer(() => releaseStartupLock(handle, path)).pipe(Effect.as(handle)),
+					),
+				),
+			);
+			return yield* effect;
+		}),
 	);
 
 const acquireStartupLock = (path: string, timeoutMs: number): Effect.Effect<FileHandle, DaemonLifecycleFailure> =>
-	Effect.tryPromise({
-		try: async () => {
-			const started = Date.now();
-			while (Date.now() - started < timeoutMs) {
-				try {
-					const handle = await open(path, "wx", 0o600);
-					await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
-					return handle;
-				} catch (cause) {
-					if (!isFileCode(cause, "EEXIST")) throw cause;
-					if (await lockIsStale(path, timeoutMs)) await unlink(path).catch(() => undefined);
-					else await Bun.sleep(25);
-				}
+	Effect.gen(function* () {
+		const started = Date.now();
+		while (Date.now() - started < timeoutMs) {
+			const acquired = yield* Effect.result(openStartupLock(path));
+			if (acquired._tag === "Success") return acquired.success;
+			if (!isFileCode(acquired.failure, "EEXIST")) {
+				return yield* Effect.fail(
+					new DaemonLifecycleFailure({
+						code: "start_timeout",
+						message: `Could not acquire the Daemon startup lock: ${errorMessage(acquired.failure)}`,
+					}),
+				);
 			}
-			throw new Error("startup lock timed out");
-		},
-		catch: (cause) =>
+			const stale = yield* Effect.tryPromise(() => lockIsStale(path, timeoutMs)).pipe(
+				Effect.catch(() => Effect.succeed(false)),
+			);
+			if (stale) yield* removeIfExists(path);
+			else yield* Effect.sleep(25);
+		}
+		return yield* Effect.fail(
 			new DaemonLifecycleFailure({
 				code: "start_timeout",
-				message: `Could not acquire the Daemon startup lock: ${errorMessage(cause)}`,
+				message: "Could not acquire the Daemon startup lock before the configured timeout.",
 			}),
+		);
 	});
+
+const openStartupLock = (path: string): Effect.Effect<FileHandle, unknown> =>
+	Effect.tryPromise({
+		try: async () => {
+			const handle = await open(path, "wx", 0o600);
+			try {
+				await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
+				return handle;
+			} catch (cause) {
+				await handle.close().catch(() => undefined);
+				await unlink(path).catch(() => undefined);
+				throw cause;
+			}
+		},
+		catch: (cause) => cause,
+	});
+
+const releaseStartupLock = (handle: FileHandle, path: string): Effect.Effect<void> =>
+	Effect.tryPromise(() => handle.close()).pipe(Effect.ignore, Effect.ensuring(removeIfExists(path)));
 
 const acquireDaemonLock = (path: string): Effect.Effect<FileHandle, DaemonLifecycleFailure> =>
 	Effect.tryPromise({
@@ -419,12 +487,15 @@ const acquireDaemonLock = (path: string): Effect.Effect<FileHandle, DaemonLifecy
 	});
 
 const releaseDaemonLock = (handle: FileHandle, path: string) =>
-	Effect.promise(() => handle.close()).pipe(Effect.ensuring(removeIfExists(path)), Effect.ignore);
+	Effect.tryPromise(() => handle.close()).pipe(Effect.ignore, Effect.ensuring(removeIfExists(path)));
 
 const cleanupStaleFiles = (config: BelfryConfiguration) =>
 	Effect.gen(function* () {
 		yield* removeIfExists(config.daemon.registryPath);
-		if (yield* Effect.promise(() => lockIsStale(config.daemon.lockPath, config.daemon.startupTimeoutMs))) {
+		const stale = yield* Effect.tryPromise(() =>
+			lockIsStale(config.daemon.lockPath, config.daemon.startupTimeoutMs),
+		).pipe(Effect.catch(() => Effect.succeed(false)));
+		if (stale) {
 			yield* removeIfExists(config.daemon.lockPath);
 		}
 	});
@@ -436,18 +507,22 @@ const removeRegistryIfOwned = (path: string, nonce: string) =>
 	);
 
 const removeIfExists = (path: string): Effect.Effect<void> =>
-	Effect.promise(() => unlink(path).catch(() => undefined)).pipe(Effect.asVoid);
+	Effect.tryPromise(() => unlink(path).catch(() => undefined)).pipe(Effect.asVoid, Effect.ignore);
 
 const lockIsStale = async (path: string, timeoutMs: number): Promise<boolean> => {
 	try {
 		const contents = await readFile(path, "utf8");
+		const metadata = await stat(path);
 		try {
-			const parsed = JSON.parse(contents) as { pid?: unknown };
-			if (typeof parsed.pid === "number") return !processExists(parsed.pid);
+			const parsed = JSON.parse(contents) as { pid?: unknown; endpoint?: unknown; nonce?: unknown };
+			if (typeof parsed.pid === "number") {
+				if (!processExists(parsed.pid)) return true;
+				if (typeof parsed.endpoint === "string" && typeof parsed.nonce === "string") return false;
+				return Date.now() - metadata.mtimeMs > Math.max(timeoutMs, 5_000);
+			}
 		} catch {
 			// A crashed owner can leave an empty or partial lock; age is the bounded recovery signal.
 		}
-		const metadata = await stat(path);
 		return Date.now() - metadata.mtimeMs > Math.max(timeoutMs, 5_000);
 	} catch (cause) {
 		return isFileCode(cause, "ENOENT");

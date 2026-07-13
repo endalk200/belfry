@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { type BelfryConfiguration, daemonEndpoint } from "@belfry/config";
 import { IngestionAdmission, type IngestionAdmissionService, IngestionUnavailable } from "@belfry/ingestion";
 import { StorageFailure, TelemetryQuery, type TelemetryReaderService } from "@belfry/storage";
@@ -9,13 +9,14 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { makeQueryApiLayer } from "./query-handlers.js";
 import { IsolatedTelemetryQuery } from "./query-transport.js";
 import { runRetentionUntilCurrent } from "./retention-schedule.js";
-import { makeOtlpRoutes, makeWebRoutes } from "./routes.js";
+import { localOnlyNetworkBoundary, makeOtlpRoutes, makeWebRoutes } from "./routes.js";
 
 export type DaemonServerOptions = {
 	readonly configuration: BelfryConfiguration;
 	readonly webRoot?: string;
 	readonly ingestionWorkerUrl?: URL;
 	readonly queryWorkerUrl?: URL;
+	readonly serviceVersion?: string;
 };
 
 export type DaemonServerHandle = {
@@ -35,13 +36,13 @@ const buildScopedLayer = <A, E, R>(
 	layer: Layer.Layer<A, E, R>,
 ): Effect.Effect<Context.Context<A>, E, R | Scope.Scope> =>
 	Effect.gen(function* () {
-		const childScope = yield* Scope.make();
+		const parentScope = yield* Scope.Scope;
+		const childScope = yield* Scope.fork(parentScope);
 		const result = yield* Effect.result(Layer.build(layer).pipe(Scope.provide(childScope)));
 		if (result._tag === "Failure") {
 			yield* Scope.close(childScope, Exit.fail(result.failure));
 			return yield* Effect.fail(result.failure);
 		}
-		yield* Effect.addFinalizer((exit) => Scope.close(childScope, exit));
 		return result.success;
 	});
 
@@ -57,6 +58,7 @@ export const startDaemonServer = (
 			startedAt,
 			nonce,
 			endpoint: daemonEndpoint(config.daemon.host, config.daemon.port),
+			serviceVersion: options.serviceVersion ?? "development",
 		};
 		const cursorSecret = yield* loadOrCreateCursorSecret(
 			config.daemon.stateDirectory,
@@ -76,6 +78,7 @@ export const startDaemonServer = (
 					maxDecompressedBytes: config.ingestion.maxDecompressedBytes,
 					queueRequestCapacity: config.ingestion.queueRequestCapacity,
 					queueByteCapacity: config.ingestion.queueByteCapacity,
+					writerTimeoutMs: config.ingestion.writerTimeoutMs,
 					drainTimeoutMs: config.ingestion.drainTimeoutMs,
 					retentionMaxAgeNs: config.storage.retentionMaxAgeNs,
 					retentionMaxBytes: config.storage.retentionMaxBytes,
@@ -89,9 +92,12 @@ export const startDaemonServer = (
 				? admissionResult.success
 				: unavailableAdmission(admissionResult.failure, config);
 		const readerResult = yield* Effect.result(
-			buildScopedLayer(TelemetryQuery.readerLayer({ databasePath: config.storage.databasePath })).pipe(
-				Effect.map((context) => Context.get(context, TelemetryQuery)),
-			),
+			buildScopedLayer(
+				TelemetryQuery.readerLayer({
+					databasePath: config.storage.databasePath,
+					maxTraceDetailSpans: config.query.maxResults,
+				}),
+			).pipe(Effect.map((context) => Context.get(context, TelemetryQuery))),
 		);
 		const queryReaderResult =
 			readerResult._tag === "Success"
@@ -100,6 +106,7 @@ export const startDaemonServer = (
 							IsolatedTelemetryQuery.layer({
 								databasePath: config.storage.databasePath,
 								timeoutMs: config.query.timeoutMs,
+								maxTraceDetailSpans: config.query.maxResults,
 								workerUrl: options.queryWorkerUrl,
 							}),
 						).pipe(Effect.map((context) => Context.get(context, IsolatedTelemetryQuery))),
@@ -131,6 +138,7 @@ export const startDaemonServer = (
 			);
 		}
 		const routes = Layer.mergeAll(
+			localOnlyNetworkBoundary,
 			makeQueryApiLayer({
 				reader,
 				admission,
@@ -161,6 +169,7 @@ export const startDaemonServer = (
 				BunHttpServer.layer({
 					hostname: config.daemon.host,
 					port: config.daemon.port,
+					maxRequestBodySize: Math.max(1_048_576, config.ingestion.maxCompressedBytes),
 					gracefulShutdownTimeout: config.daemon.shutdownTimeoutMs,
 				}),
 			),
@@ -210,9 +219,14 @@ const loadOrCreateCursorSecret = (
 	Effect.tryPromise({
 		try: async () => {
 			await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+			await chmod(stateDirectory, 0o700);
 			try {
 				const existing = await readFile(secretPath);
-				if (existing.byteLength >= 32) return new Uint8Array(existing);
+				if (existing.byteLength >= 32) {
+					await chmod(secretPath, 0o600);
+					return new Uint8Array(existing);
+				}
+				return replaceCursorSecret(secretPath);
 			} catch (cause) {
 				if (!isMissingFile(cause)) throw cause;
 			}
@@ -222,7 +236,10 @@ const loadOrCreateCursorSecret = (
 				return secret;
 			} catch (cause) {
 				if (!isAlreadyExists(cause)) throw cause;
-				return new Uint8Array(await readFile(secretPath));
+				const existing = await readFile(secretPath);
+				if (existing.byteLength < 32) return replaceCursorSecret(secretPath);
+				await chmod(secretPath, 0o600);
+				return new Uint8Array(existing);
 			}
 		},
 		catch: (cause) =>
@@ -231,6 +248,20 @@ const loadOrCreateCursorSecret = (
 				message: `Could not initialize the machine state directory: ${cause instanceof Error ? cause.message : String(cause)}`,
 			}),
 	});
+
+const replaceCursorSecret = async (secretPath: string): Promise<Uint8Array> => {
+	const secret = crypto.getRandomValues(new Uint8Array(32));
+	const temporary = `${secretPath}.${crypto.randomUUID()}.tmp`;
+	try {
+		await writeFile(temporary, secret, { flag: "wx", mode: 0o600 });
+		await rename(temporary, secretPath);
+		await chmod(secretPath, 0o600);
+		return secret;
+	} catch (cause) {
+		await unlink(temporary).catch(() => undefined);
+		throw cause;
+	}
+};
 
 const isMissingFile = (cause: unknown): boolean =>
 	typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT";
