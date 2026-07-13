@@ -1,6 +1,7 @@
 import { DaemonLifecycleFailure, DaemonManager, type DaemonStatus } from "@belfry/daemon/lifecycle";
 import { Console, Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
+import { stringifyStableJson } from "../../../runtime/json.js";
 
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Emit stable JSON for scripts"));
 
@@ -10,7 +11,7 @@ const startCommand = Command.make("start", { json: jsonFlag }, ({ json }) =>
 		const result = yield* manager.start;
 		yield* Console.log(
 			json
-				? JSON.stringify({ state: "running", adopted: result.adopted, ...result.registry })
+				? stringifyStableJson({ state: "running", adopted: result.adopted, ...result.registry })
 				: result.adopted
 					? `Adopted Belfry Daemon ${result.registry.pid} at ${result.registry.endpoint}.`
 					: `Started Belfry Daemon ${result.registry.pid} at ${result.registry.endpoint}.`,
@@ -24,7 +25,7 @@ const stopCommand = Command.make("stop", { json: jsonFlag }, ({ json }) =>
 		const registry = yield* manager.stop;
 		yield* Console.log(
 			json
-				? JSON.stringify({ state: "stopped", pid: registry.pid, endpoint: registry.endpoint })
+				? stringifyStableJson({ state: "stopped", pid: registry.pid, endpoint: registry.endpoint })
 				: `Stopped Belfry Daemon ${registry.pid}.`,
 		);
 	}),
@@ -36,7 +37,7 @@ const restartCommand = Command.make("restart", { json: jsonFlag }, ({ json }) =>
 		const result = yield* manager.restart;
 		yield* Console.log(
 			json
-				? JSON.stringify({ state: "running", adopted: result.adopted, ...result.registry })
+				? stringifyStableJson({ state: "running", adopted: result.adopted, ...result.registry })
 				: `Restarted Belfry Daemon ${result.registry.pid} at ${result.registry.endpoint}.`,
 		);
 	}),
@@ -47,7 +48,7 @@ const statusCommand = Command.make("status", { json: jsonFlag }, ({ json }) =>
 		const manager = yield* DaemonManager;
 		const status = yield* manager.status;
 		if (json) {
-			yield* Console.log(JSON.stringify(statusJson(status)));
+			yield* Console.log(stringifyStableJson(statusJson(status)));
 		} else if (status.state === "running") {
 			yield* Console.log(status.message);
 		}

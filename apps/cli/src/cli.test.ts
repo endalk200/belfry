@@ -20,6 +20,7 @@ import { configValidationHasFailures, formatConfigValidationReport } from "./cli
 import { shouldOpenWebWorkspace, startWebWorkspace } from "./cli/commands/web.cmd.js";
 import { runCliWithArgs } from "./cli/run.js";
 import { handleCliFailure, reportUnexpectedCliFailure } from "./runtime/failures.js";
+import { stringifyStableJson } from "./runtime/json.js";
 import {
 	DEFAULT_OTLP_HTTP_ENDPOINT,
 	telemetryLayerFromConfiguration,
@@ -122,6 +123,13 @@ const runBelfryCommand = (
 	}).pipe(withIsolatedBelfryEnvironment, Effect.provide(cliTestLayer(files, manager, config)));
 
 describe("belfry CLI", () => {
+	it("serializes script output with deterministic keys and bigint values", () => {
+		assert.strictEqual(
+			stringifyStableJson({ z: 1, a: 2n, nested: { y: true, b: "x" } }),
+			'{"a":"2","nested":{"b":"x","y":true},"z":1}',
+		);
+	});
+
 	it.effect("starts the browser Workspace and prints its URL for the bare command", () =>
 		Effect.gen(function* () {
 			const endpoint = "http://127.0.0.1:24318";
@@ -129,7 +137,14 @@ describe("belfry CLI", () => {
 				...DaemonManagerTestService,
 				start: Effect.succeed({
 					adopted: false,
-					registry: { version: 1, pid: 42, startedAt: 1, nonce: "test", endpoint },
+					registry: {
+						version: 1,
+						pid: 42,
+						startedAt: 1,
+						nonce: "test",
+						endpoint,
+						serviceVersion: "test",
+					},
 				}),
 			};
 			const config = {
@@ -367,7 +382,14 @@ describe("belfry CLI", () => {
 				...DaemonManagerTestService,
 				start: Effect.succeed({
 					adopted: true,
-					registry: { version: 1, pid: 42, startedAt: 1, nonce: "test", endpoint },
+					registry: {
+						version: 1,
+						pid: 42,
+						startedAt: 1,
+						nonce: "test",
+						endpoint,
+						serviceVersion: "test",
+					},
 				}),
 			};
 			let launchedUrl: string | undefined;
