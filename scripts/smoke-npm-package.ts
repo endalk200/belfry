@@ -39,11 +39,12 @@ const run = (
 		throw new Error(`${command} ${args.join(" ")} failed:\n${result.stderr}\n${result.stdout}`);
 	}
 
-	return result.stdout.trim();
+	return (typeof result.stdout === "string" ? result.stdout : result.stdout.toString("utf8")).trim();
 };
 
 const packOutput = run("npm", ["pack", "--json", "--pack-destination", smokeRoot, cliRoot], repoRoot);
 const [packedPackage] = JSON.parse(packOutput) as Array<{ readonly filename: string }>;
+if (packedPackage === undefined) throw new Error("npm pack did not report a package artifact.");
 const tarballPath = join(smokeRoot, packedPackage.filename);
 
 run("bun", ["init", "-y"], smokeRoot);

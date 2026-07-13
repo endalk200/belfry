@@ -5,11 +5,7 @@
 	"changelog": "@changesets/cli/changelog",
 	"commit": false,
 	"fixed": [],
-	"ignore": [
-		"@belfry/biome-config",
-		"@belfry/config",
-		"@belfry/typescript-config"
-	],
+	"ignore": ["@belfry/config", "@belfry/typescript-config"],
 	"linked": [],
 	"updateInternalDependencies": "patch"
 }

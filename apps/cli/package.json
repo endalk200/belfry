@@ -1,7 +1,7 @@
 {
 	"name": "@belfry/cli",
 	"version": "0.0.1",
-	"description": "CLI for Belfry",
+	"description": "Local-only OpenTelemetry trace and log workbench for application development",
 	"private": false,
 	"type": "module",
 	"bin": {
@@ -10,13 +10,28 @@
 	"files": [
 		"dist",
 		"LICENSE",
-		"README.md"
+		"README.md",
+		"THIRD_PARTY_NOTICES.md"
 	],
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/endalk200/belfry.git",
 		"directory": "apps/cli"
 	},
+	"homepage": "https://github.com/endalk200/belfry#readme",
+	"bugs": {
+		"url": "https://github.com/endalk200/belfry/issues"
+	},
+	"keywords": [
+		"bun",
+		"local-development",
+		"logs",
+		"observability",
+		"opentelemetry",
+		"otlp",
+		"sqlite",
+		"tracing"
+	],
 	"license": "MIT",
 	"engines": {
 		"bun": ">=1.3.0"
@@ -28,10 +43,10 @@
 	"scripts": {
 		"build": "bun run ../../scripts/build-cli.ts",
 		"check-types": "tsc -p tsconfig.json --noEmit",
-		"format": "biome format --write package.json tsconfig.json src",
-		"format:check": "biome format package.json tsconfig.json src",
-		"lint": "biome check package.json tsconfig.json src",
-		"lint:fix": "biome check --fix package.json tsconfig.json src",
+		"format": "biome format --write package.json tsconfig.json turbo.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md src",
+		"format:check": "biome format package.json tsconfig.json turbo.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md src",
+		"lint": "biome check package.json tsconfig.json turbo.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md src",
+		"lint:fix": "biome check --fix package.json tsconfig.json turbo.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md src",
 		"test": "vitest run src --passWithNoTests"
 	},
 	"devDependencies": {
