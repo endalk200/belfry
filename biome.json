@@ -1,11 +1,9 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
 	"root": true,
 	"linter": {
 		"enabled": true,
-		"rules": {
-			"recommended": true
-		}
+		"rules": { "preset": "recommended" }
 	},
 	"formatter": {
 		"lineWidth": 120,

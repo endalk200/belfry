@@ -39,6 +39,7 @@
 		"@belfry/daemon": "workspace:*",
 		"@belfry/storage": "workspace:*",
 		"@belfry/typescript-config": "workspace:*",
+		"@belfry/web": "workspace:*",
 		"@effect/opentelemetry": "4.0.0-beta.97",
 		"@effect/platform-bun": "4.0.0-beta.97",
 		"@effect/sql-sqlite-bun": "4.0.0-beta.97",
@@ -55,8 +56,6 @@
 		"@types/bun": "^1.3.14",
 		"@types/node": "^26.1.0",
 		"effect": "4.0.0-beta.97",
-		"protobufjs": "^8.7.0",
-		"protobufjs-cli": "^2.6.0",
 		"typescript": "6.0.3",
 		"vitest": "^4.1.10"
 	}

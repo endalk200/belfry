@@ -34,9 +34,6 @@ dist
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-# AI SDK DevTools local traces and state.
-.devtools
-
 # Misc
 .DS_Store
 *.pem

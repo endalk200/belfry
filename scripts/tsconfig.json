@@ -7,5 +7,5 @@
 		"rootDir": ".",
 		"types": ["bun"]
 	},
-	"include": ["benchmark-workbench.ts", "otel-sdk-fixture.ts"]
+	"include": ["*.ts"]
 }
