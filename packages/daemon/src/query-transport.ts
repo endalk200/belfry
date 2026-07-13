@@ -34,6 +34,7 @@ type Facets = EffectSuccess<ReturnType<QueryReaderService["facets"]>>;
 export type QueryReaderOptions = {
 	readonly databasePath: string;
 	readonly timeoutMs: number;
+	readonly maxTraceDetailSpans: number;
 	readonly workerUrl?: URL | undefined;
 };
 
@@ -58,6 +59,7 @@ type WorkerState = {
 };
 
 class QueryDeadlineExceeded extends Error {}
+class QueryRequestAborted extends Error {}
 
 export const openQueryReader = (
 	options: QueryReaderOptions,
@@ -68,11 +70,11 @@ export const openQueryReader = (
 			try: () => transport.initialize(),
 			catch: () => queryFailure("read_failed", "Could not initialize the isolated Query worker."),
 		});
-		yield* Effect.addFinalizer(() => Effect.sync(() => transport.close()));
+		yield* Effect.addFinalizer(() => Effect.tryPromise(() => transport.close()).pipe(Effect.ignore));
 
 		const call = Effect.fn("IsolatedTelemetryQuery.call")(function* (request: QueryWorkerRequest) {
 			return yield* Effect.tryPromise({
-				try: () => transport.call(request),
+				try: (signal) => transport.call(request, signal),
 				catch: (cause) =>
 					cause instanceof QueryDeadlineExceeded
 						? queryFailure(
@@ -149,6 +151,7 @@ const makeQueryTransport = (options: QueryReaderOptions) => {
 	const states = new Set<WorkerState>();
 	let current: WorkerState | undefined;
 	let starting: Promise<WorkerState> | undefined;
+	let turn: Promise<void> = Promise.resolve();
 	let closed = false;
 
 	const dispose = (state: WorkerState, cause: unknown) => {
@@ -184,31 +187,55 @@ const makeQueryTransport = (options: QueryReaderOptions) => {
 		return state;
 	};
 
-	const requestOn = (state: WorkerState, request: QueryWorkerRequest): Promise<QueryWorkerResponse> =>
+	const requestOn = (
+		state: WorkerState,
+		request: QueryWorkerRequest,
+		signal?: AbortSignal,
+	): Promise<QueryWorkerResponse> =>
 		new Promise((resolve, reject) => {
 			if (state.disposed) {
 				reject(new Error("Query worker closed"));
 				return;
 			}
+			if (signal?.aborted) {
+				reject(new QueryRequestAborted());
+				return;
+			}
+			const cleanup = () => signal?.removeEventListener("abort", onAbort);
+			const onAbort = () => {
+				state.pending.delete(request.id);
+				clearTimeout(timeout);
+				cleanup();
+				reject(new QueryRequestAborted());
+			};
 			const timeout = setTimeout(() => {
 				state.pending.delete(request.id);
+				cleanup();
 				reject(new QueryDeadlineExceeded());
 			}, options.timeoutMs);
 			state.pending.set(request.id, {
 				resolve: (response) => {
 					clearTimeout(timeout);
+					cleanup();
 					resolve(response);
 				},
 				reject: (cause) => {
 					clearTimeout(timeout);
+					cleanup();
 					reject(cause);
 				},
 			});
+			signal?.addEventListener("abort", onAbort, { once: true });
+			if (signal?.aborted) {
+				onAbort();
+				return;
+			}
 			try {
 				state.worker.postMessage(Schema.encodeSync(QueryWorkerRequestSchema)(request));
 			} catch (cause) {
 				state.pending.delete(request.id);
 				clearTimeout(timeout);
+				cleanup();
 				reject(cause);
 			}
 		});
@@ -226,7 +253,10 @@ const makeQueryTransport = (options: QueryReaderOptions) => {
 		const promise = requestOn(state, {
 			_tag: "initialize",
 			id: crypto.randomUUID(),
-			configuration: { databasePath: options.databasePath },
+			configuration: {
+				databasePath: options.databasePath,
+				maxTraceDetailSpans: options.maxTraceDetailSpans,
+			},
 		})
 			.then((response) => {
 				if (response._tag !== "ready") throw new Error("Query worker initialization failed");
@@ -249,23 +279,50 @@ const makeQueryTransport = (options: QueryReaderOptions) => {
 		return promise;
 	};
 
-	const call = (request: QueryWorkerRequest): Promise<QueryWorkerResponse> =>
-		ensureState().then((state) =>
-			requestOn(state, request).catch((cause) => {
+	const call = (request: QueryWorkerRequest, signal?: AbortSignal): Promise<QueryWorkerResponse> => {
+		const operation = turn.then(async () => {
+			if (signal?.aborted) throw new QueryRequestAborted();
+			const state = await ensureState();
+			try {
+				return await requestOn(state, request, signal);
+			} catch (cause) {
 				dispose(state, cause);
 				throw cause;
-			}),
+			}
+		});
+		turn = operation.then(
+			() => undefined,
+			() => undefined,
 		);
+		return operation;
+	};
+
+	const close = async (): Promise<void> => {
+		if (closed) return;
+		closed = true;
+		await Promise.race([turn, delay(250)]);
+		for (const state of [...states]) {
+			if (!state.disposed && state.pending.size === 0) {
+				await Promise.race([
+					requestOn(state, { _tag: "shutdown", id: crypto.randomUUID() }).catch(() => undefined),
+					delay(250),
+				]);
+			}
+			dispose(state, new Error("Query transport closed"));
+		}
+	};
 
 	return {
 		initialize: ensureState,
 		call,
-		close: () => {
-			closed = true;
-			for (const state of [...states]) dispose(state, new Error("Query transport closed"));
-		},
+		close,
 	};
 };
+
+const delay = (milliseconds: number): Promise<void> =>
+	new Promise((resolve) => {
+		setTimeout(resolve, milliseconds);
+	});
 
 const expectListResponse = <A>(
 	response: QueryWorkerResponse,

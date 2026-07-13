@@ -198,6 +198,8 @@ const respond = async (route: Route): Promise<void> => {
 			queueDepth: 0,
 			queueBytes: "0",
 			databaseSizeBytes: "4096",
+			storageSizeBytes: "4096",
+			walSizeBytes: "0",
 		});
 	await route.fulfill({
 		status: 404,

@@ -47,7 +47,9 @@ workerGlobal.onmessage = (event) => {
 };
 
 const handleRequest = (request: QueryWorkerRequest): Effect.Effect<QueryWorkerResponse> => {
-	if (request._tag === "initialize") return initialize(request.id, request.configuration.databasePath);
+	if (request._tag === "initialize") {
+		return initialize(request.id, request.configuration.databasePath, request.configuration.maxTraceDetailSpans);
+	}
 	if (request._tag === "shutdown") return shutdown(request.id);
 	if (reader === undefined) {
 		return Effect.succeed({
@@ -124,7 +126,11 @@ const handleRequest = (request: QueryWorkerRequest): Effect.Effect<QueryWorkerRe
 	}
 };
 
-const initialize = (id: string, databasePath: string): Effect.Effect<QueryWorkerResponse> =>
+const initialize = (
+	id: string,
+	databasePath: string,
+	maxTraceDetailSpans: number,
+): Effect.Effect<QueryWorkerResponse> =>
 	Effect.gen(function* () {
 		if (reader !== undefined) {
 			return {
@@ -134,7 +140,9 @@ const initialize = (id: string, databasePath: string): Effect.Effect<QueryWorker
 			} as const;
 		}
 		const scope = yield* Scope.make();
-		const opened = yield* Effect.result(openTelemetryReader({ databasePath }).pipe(Scope.provide(scope)));
+		const opened = yield* Effect.result(
+			openTelemetryReader({ databasePath, maxTraceDetailSpans }).pipe(Scope.provide(scope)),
+		);
 		if (opened._tag === "Failure") {
 			yield* Scope.close(scope, Exit.fail(opened.failure));
 			return {

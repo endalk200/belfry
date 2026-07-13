@@ -25,6 +25,7 @@ import { useVirtualWindow } from "./virtual-list.js";
 
 export function TraceDetailView({
 	trace,
+	logs,
 	workspace,
 	onAction,
 	onOpenLog,
@@ -32,6 +33,7 @@ export function TraceDetailView({
 	onNotice,
 }: {
 	readonly trace: TraceDetail;
+	readonly logs: ReadonlyArray<LogSummary>;
 	readonly workspace: WorkspaceState;
 	readonly onAction: (action: WorkspaceAction) => void;
 	readonly onOpenLog: (log: LogSummary) => void;
@@ -76,6 +78,12 @@ export function TraceDetailView({
 						Warning: {warning}
 					</span>
 				))}
+				{trace.spansTruncated ? (
+					<span className="warning">
+						Showing the first {trace.spans.length} of {trace.spanCount} spans. Narrow the trace at the
+						source for a complete waterfall.
+					</span>
+				) : null}
 			</div>
 
 			<Waterfall trace={trace} workspace={workspace} onAction={onAction} />
@@ -100,7 +108,7 @@ export function TraceDetailView({
 			) : (
 				<SpanDetailPanel
 					span={selectedSpan}
-					logs={trace.logs.filter((log) => log.spanId === selectedSpan.spanId)}
+					logs={logs.filter((log) => log.spanId === selectedSpan.spanId)}
 					onOpenLog={onOpenLog}
 					onAction={onAction}
 					onFilterAttribute={promoteAttribute}
@@ -114,12 +122,12 @@ export function TraceDetailView({
 						<p className="eyebrow">CORRELATION</p>
 						<h2 id="trace-logs-title">Trace logs</h2>
 					</div>
-					<span>{trace.logs.length} records</span>
+					<span>{logs.length} records</span>
 				</div>
-				{trace.logs.length === 0 ? (
+				{logs.length === 0 ? (
 					<p className="muted">No logs reference this trace.</p>
 				) : (
-					<CorrelatedLogList logs={trace.logs} onOpenLog={onOpenLog} label="Trace-correlated logs" />
+					<CorrelatedLogList logs={logs} onOpenLog={onOpenLog} label="Trace-correlated logs" />
 				)}
 			</section>
 		</article>
