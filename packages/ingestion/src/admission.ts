@@ -58,6 +58,7 @@ export type IngestionAdmissionOptions = {
 	readonly maxDecompressedBytes: number;
 	readonly queueRequestCapacity: number;
 	readonly queueByteCapacity: number;
+	readonly writerTimeoutMs: number;
 	readonly drainTimeoutMs: number;
 	readonly retentionMaxAgeNs: bigint;
 	readonly retentionMaxBytes: bigint;
@@ -86,7 +87,6 @@ type QueuedRequest = {
 
 type QueuedDiagnostic = {
 	readonly diagnostic: WriterDiagnostic;
-	readonly deferred: Deferred.Deferred<void>;
 };
 
 type CapacityState = {
@@ -132,7 +132,7 @@ export const openIngestionAdmission = (
 		}));
 		const transportContext = yield* Layer.build(
 			WriterWorkerTransport.layer({
-				timeoutMs: options.drainTimeoutMs,
+				timeoutMs: options.writerTimeoutMs,
 				workerUrl: options.workerUrl,
 				onUnavailable: markWriterUnavailable,
 			}),
@@ -181,10 +181,9 @@ export const openIngestionAdmission = (
 					yield* recordUnpersistedRejection;
 					return;
 				}
-				const deferred = yield* Deferred.make<void>();
 				const offered = yield* Effect.uninterruptible(
 					Ref.update(diagnosticPending, (pending) => pending + 1).pipe(
-						Effect.andThen(Queue.offer(Queue.asEnqueue(diagnosticQueue), { diagnostic, deferred })),
+						Effect.andThen(Queue.offer(Queue.asEnqueue(diagnosticQueue), { diagnostic })),
 						Effect.tap((accepted) =>
 							accepted
 								? Effect.void
@@ -194,19 +193,17 @@ export const openIngestionAdmission = (
 						),
 					),
 				);
-				if (offered) yield* Deferred.await(deferred);
+				if (!offered) return;
 			});
 		const diagnosticConsumer = Effect.forever(
 			Queue.take(Queue.asDequeue(diagnosticQueue)).pipe(
 				Effect.flatMap((item) =>
 					Effect.gen(function* () {
-						yield* waitUntilDrained(capacity, options.drainTimeoutMs);
 						const persisted = yield* Effect.result(persistRejection(item.diagnostic));
 						if (persisted._tag === "Failure") yield* recordUnpersistedRejection;
 					}).pipe(
 						Effect.ignore,
 						Effect.ensuring(Ref.update(diagnosticPending, (pending) => Math.max(0, pending - 1))),
-						Effect.andThen(Deferred.succeed(item.deferred, undefined)),
 					),
 				),
 			),

@@ -1,8 +1,9 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { opentelemetry } from "@belfry/otlp-proto";
 import { openTelemetryReader } from "@belfry/storage";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 
 import { openIngestionAdmission } from "./admission.js";
 import { failingWriterWorkerUrl } from "./test-support.js";
@@ -21,6 +22,7 @@ const program = Effect.scoped(
 			maxDecompressedBytes: 65_536,
 			queueRequestCapacity: 4,
 			queueByteCapacity: 65_536,
+			writerTimeoutMs: 5_000,
 			drainTimeoutMs: 5_000,
 			retentionMaxAgeNs: 604_800_000_000_000n,
 			retentionMaxBytes: 1_073_741_824n,
@@ -44,6 +46,21 @@ const program = Effect.scoped(
 			contentType: "application/json",
 			contentEncoding: "gzip",
 			body: new Uint8Array(Bun.gzipSync(logBytes)),
+		});
+		const nonFiniteTraceResult = yield* admission.submit({
+			signal: "traces",
+			contentType: "application/x-protobuf",
+			body: nonFiniteTracePayload(),
+		});
+		const nonFiniteLogResult = yield* admission.submit({
+			signal: "logs",
+			contentType: "application/x-protobuf",
+			body: nonFiniteLogPayload(),
+		});
+		const afterNonFiniteResult = yield* admission.submit({
+			signal: "traces",
+			contentType: "application/json",
+			body: encoder.encode(JSON.stringify(tracePayload("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"))),
 		});
 
 		const malformed = yield* Effect.result(
@@ -87,6 +104,8 @@ const program = Effect.scoped(
 			sort: "newest",
 			limit: 100,
 		});
+		const nonFiniteTrace = yield* reader.getTrace("11111111111111111111111111111111");
+		const nonFiniteLogs = yield* Effect.all(nonFiniteLogResult.logIds.map((id) => reader.getLog(id)));
 		const snapshot = yield* admission.snapshot;
 		const stats = yield* reader.ingestionStats;
 		return {
@@ -96,9 +115,19 @@ const program = Effect.scoped(
 				releasedSnapshot.queueDepth === 0,
 			traceRecords: traceResult.records,
 			logRecords: logResult.records,
+			nonFiniteTraceRecords: nonFiniteTraceResult.records,
+			nonFiniteLogRecords: nonFiniteLogResult.records,
+			afterNonFiniteRecords: afterNonFiniteResult.records,
+			nonFiniteTraceValues: ["nan", "positive", "negative"].map((key) => {
+				const value = nonFiniteTrace.spans[0]?.attributes[key];
+				return displayNumber(value?.type === "double" ? value.value : undefined);
+			}),
+			nonFiniteLogValues: nonFiniteLogs.map((log) =>
+				displayNumber(log.body.type === "double" ? log.body.value : undefined),
+			),
 			traceCount: traces.items.length,
 			logCount: logs.items.length,
-			traceId: traces.items[0]?.traceId,
+			originalTracePresent: traces.items.some((trace) => trace.traceId === traceId),
 			malformedCode:
 				malformed._tag === "Failure" && "code" in malformed.failure ? malformed.failure.code : undefined,
 			oversizedStage:
@@ -132,6 +161,7 @@ const failedWorker = await Effect.runPromise(
 				maxDecompressedBytes: 65_536,
 				queueRequestCapacity: 2,
 				queueByteCapacity: 32_768,
+				writerTimeoutMs: 100,
 				drainTimeoutMs: 100,
 				retentionMaxAgeNs: 604_800_000_000_000n,
 				retentionMaxBytes: 1_073_741_824n,
@@ -156,9 +186,41 @@ const failedWorker = await Effect.runPromise(
 		}),
 	),
 );
-console.log(`BELFRY_TEST_RESULT=${JSON.stringify({ ...result, failedWorker })}`);
+const rejectionLatencyMs = await Effect.runPromise(
+	Effect.scoped(
+		Effect.gen(function* () {
+			const admission = yield* openIngestionAdmission({
+				storage: { databasePath: join(stateDirectory, "unused-slow-worker.db") },
+				maxCompressedBytes: 16_384,
+				maxDecompressedBytes: 65_536,
+				queueRequestCapacity: 2,
+				queueByteCapacity: 32_768,
+				writerTimeoutMs: 2_000,
+				drainTimeoutMs: 2_000,
+				retentionMaxAgeNs: 604_800_000_000_000n,
+				retentionMaxBytes: 1_073_741_824n,
+				retentionBatchSize: 100,
+				workerUrl: new URL("./test-support/slow-writer-worker.ts", import.meta.url),
+			});
+			const pending = yield* admission
+				.submit({
+					signal: "traces",
+					contentType: "application/json",
+					body: encoder.encode("{}"),
+				})
+				.pipe(Effect.forkChild({ startImmediately: true }));
+			yield* Effect.sleep(25);
+			const startedAt = performance.now();
+			yield* Effect.result(admission.reserve({ signal: "logs", contentType: "text/plain" }, 5));
+			const durationMs = performance.now() - startedAt;
+			yield* Fiber.join(pending);
+			return durationMs;
+		}),
+	),
+);
+console.log(`BELFRY_TEST_RESULT=${JSON.stringify({ ...result, failedWorker, rejectionLatencyMs })}`);
 
-function tracePayload() {
+function tracePayload(nextTraceId = traceId, nextSpanId = spanId) {
 	return {
 		resourceSpans: [
 			{
@@ -168,8 +230,8 @@ function tracePayload() {
 						scope: { name: "integration" },
 						spans: [
 							{
-								traceId,
-								spanId,
+								traceId: nextTraceId,
+								spanId: nextSpanId,
 								name: "GET /ready",
 								kind: 2,
 								startTimeUnixNano: "1781420000000000001",
@@ -182,6 +244,60 @@ function tracePayload() {
 			},
 		],
 	};
+}
+
+function nonFiniteTracePayload(): Uint8Array {
+	const request = opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest.fromObject({
+		resourceSpans: [
+			{
+				resource: { attributes: resourceAttributes() },
+				scopeSpans: [
+					{
+						spans: [
+							{
+								traceId: Buffer.from("11111111111111111111111111111111", "hex"),
+								spanId: Buffer.from("2222222222222222", "hex"),
+								name: "non-finite doubles",
+								startTimeUnixNano: "1781420000002000001",
+								endTimeUnixNano: "1781420000002000002",
+								attributes: [
+									{ key: "nan", value: { doubleValue: Number.NaN } },
+									{ key: "positive", value: { doubleValue: Number.POSITIVE_INFINITY } },
+									{ key: "negative", value: { doubleValue: Number.NEGATIVE_INFINITY } },
+								],
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+	return new Uint8Array(opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest.encode(request).finish());
+}
+
+function nonFiniteLogPayload(): Uint8Array {
+	const request = opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest.fromObject({
+		resourceLogs: [
+			{
+				resource: { attributes: resourceAttributes() },
+				scopeLogs: [
+					{
+						logRecords: [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY].map(
+							(value, index) => ({
+								timeUnixNano: String(1_781_420_000_003_000_001n + BigInt(index)),
+								body: { doubleValue: value },
+							}),
+						),
+					},
+				],
+			},
+		],
+	});
+	return new Uint8Array(opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest.encode(request).finish());
+}
+
+function displayNumber(value: number | undefined): string {
+	return value === undefined ? "missing" : Number.isNaN(value) ? "NaN" : String(value);
 }
 
 function logPayload() {

@@ -9,9 +9,14 @@ describe("Ingestion Admission", () => {
 		assert.strictEqual(result.reservedBeforeBody, true);
 		assert.strictEqual(result.traceRecords, 1);
 		assert.strictEqual(result.logRecords, 1);
-		assert.strictEqual(result.traceCount, 1);
-		assert.strictEqual(result.logCount, 1);
-		assert.strictEqual(result.traceId, "4bf92f3577b34da6a3ce929d0e0e4736");
+		assert.strictEqual(result.nonFiniteTraceRecords, 1);
+		assert.strictEqual(result.nonFiniteLogRecords, 3);
+		assert.strictEqual(result.afterNonFiniteRecords, 1);
+		assert.deepStrictEqual(result.nonFiniteTraceValues, ["NaN", "Infinity", "-Infinity"]);
+		assert.deepStrictEqual(result.nonFiniteLogValues, ["NaN", "Infinity", "-Infinity"]);
+		assert.strictEqual(result.traceCount, 3);
+		assert.strictEqual(result.logCount, 4);
+		assert.strictEqual(result.originalTracePresent, true);
 		assert.strictEqual(result.malformedCode, "malformed_payload");
 		assert.strictEqual(result.oversizedStage, "compressed");
 		assert.strictEqual(result.decompressedLimit, 65_536);
@@ -22,6 +27,7 @@ describe("Ingestion Admission", () => {
 		assert.strictEqual(result.unpersistedRejectedRequests, "0");
 		assert.strictEqual(result.droppedDiagnostics, "0");
 		assert.isAbove(Number(result.writeLatencyP95Ms), 0);
+		assert.isBelow(Number(result.rejectionLatencyMs), 150);
 		assert.strictEqual(result.writerFailure, undefined);
 		assert.deepStrictEqual(result.failedWorker, {
 			submitFailed: true,

@@ -36,24 +36,35 @@ let storageScope: Scope.Closeable | undefined;
 let messageChain = Promise.resolve();
 
 workerGlobal.onmessage = (event) => {
-	messageChain = messageChain.then(async () => {
-		let request: WriterRequest;
-		try {
-			request = Schema.decodeUnknownSync(WriterRequestSchema)(event.data);
-		} catch (cause) {
+	const data = event.data;
+	messageChain = messageChain
+		.catch(() => undefined)
+		.then(async () => {
+			let request: WriterRequest;
+			try {
+				request = Schema.decodeUnknownSync(WriterRequestSchema)(data);
+			} catch (cause) {
+				post({
+					_tag: "failure",
+					id: requestId(data),
+					code: "worker_protocol_error",
+					message: `Invalid writer request: ${errorMessage(cause)}`,
+				});
+				return;
+			}
+
+			const response = await Effect.runPromise(handleRequest(request));
+			post(response);
+			if (response._tag === "shutdown-success") workerGlobal.close();
+		})
+		.catch((cause) => {
 			post({
 				_tag: "failure",
-				id: requestId(event.data),
-				code: "worker_protocol_error",
-				message: `Invalid writer request: ${errorMessage(cause)}`,
+				id: requestId(data),
+				code: "storage_unavailable",
+				message: `Writer request failed unexpectedly: ${errorMessage(cause)}`,
 			});
-			return;
-		}
-
-		const response = await Effect.runPromise(handleRequest(request));
-		post(response);
-		if (response._tag === "shutdown-success") workerGlobal.close();
-	});
+		});
 };
 
 const handleRequest = (request: WriterRequest): Effect.Effect<WriterResponse> => {
