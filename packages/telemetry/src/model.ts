@@ -208,7 +208,7 @@ export type LogDetail = typeof LogDetailSchema.Type;
 export const TraceDetailSchema = Schema.Struct({
 	...TraceSummarySchema.fields,
 	spans: Schema.Array(TraceSpanDetailSchema),
-	logs: Schema.Array(LogSummarySchema),
+	spansTruncated: Schema.Boolean,
 });
 export type TraceDetail = typeof TraceDetailSchema.Type;
 

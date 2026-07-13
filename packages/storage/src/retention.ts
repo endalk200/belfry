@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { Effect } from "effect";
 import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient";
 
@@ -46,6 +47,31 @@ export const databaseSizeFor = (client: SqlClientType): Effect.Effect<bigint, un
 		const [pageSize] = yield* query<{ page_size: bigint }>(client, "PRAGMA page_size");
 		return ((pageCount?.page_count ?? 0n) - (freeList?.freelist_count ?? 0n)) * (pageSize?.page_size ?? 0n);
 	});
+
+export const storageFileSizesFor = (
+	databasePath: string,
+): Effect.Effect<{ readonly storageSizeBytes: bigint; readonly walSizeBytes: bigint }, unknown> =>
+	Effect.try({
+		try: () => {
+			const databaseSizeBytes = fileSize(databasePath);
+			const walSizeBytes = fileSize(`${databasePath}-wal`);
+			const sharedMemorySizeBytes = fileSize(`${databasePath}-shm`);
+			return {
+				storageSizeBytes: databaseSizeBytes + walSizeBytes + sharedMemorySizeBytes,
+				walSizeBytes,
+			};
+		},
+		catch: (cause) => cause,
+	});
+
+const fileSize = (path: string): bigint => {
+	try {
+		return statSync(path, { bigint: true }).size;
+	} catch (cause) {
+		if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT") return 0n;
+		throw cause;
+	}
+};
 
 const deleteTelemetry = (client: SqlClientType, traceIds: ReadonlyArray<string>, logIds: ReadonlyArray<string>) =>
 	Effect.gen(function* () {

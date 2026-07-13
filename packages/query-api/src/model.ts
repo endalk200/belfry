@@ -188,6 +188,7 @@ export const DaemonIdentitySchema = Schema.Struct({
 	startedAt: Schema.Number,
 	nonce: Schema.String,
 	endpoint: Schema.String,
+	serviceVersion: Schema.String,
 });
 export type DaemonIdentity = typeof DaemonIdentitySchema.Type;
 
@@ -200,6 +201,8 @@ export const HealthSchema = Schema.Struct({
 	queueDepth: Schema.Number,
 	queueBytes: Schema.BigIntFromString,
 	databaseSizeBytes: Schema.BigIntFromString,
+	storageSizeBytes: Schema.BigIntFromString,
+	walSizeBytes: Schema.BigIntFromString,
 	daemon: Schema.optional(DaemonIdentitySchema),
 	message: Schema.optional(Schema.String),
 }).annotate({ identifier: "Health" });
@@ -218,6 +221,8 @@ export const IngestionStatsSchema = Schema.Struct({
 	droppedDiagnostics: Schema.BigIntFromString,
 	truncatedValues: Schema.BigIntFromString,
 	databaseSizeBytes: Schema.BigIntFromString,
+	storageSizeBytes: Schema.BigIntFromString,
+	walSizeBytes: Schema.BigIntFromString,
 	retentionDeletedRecords: Schema.BigIntFromString,
 	retentionRunning: Schema.Boolean,
 }).annotate({ identifier: "IngestionStats" });

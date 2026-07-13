@@ -1,6 +1,6 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type SpanDetail, serviceIdentityKey } from "@belfry/telemetry";
 import { Effect, Fiber } from "effect";
 
@@ -101,7 +101,8 @@ const logCorrelation = Effect.scoped(
 			limit: 100,
 		});
 		const log = yield* storage.getLog(result.logIds[0] ?? "");
-		const trace = yield* storage.getTrace(traceId);
+		const traceLogs = yield* storage.listTraceLogs(traceId, 100);
+		const correlatedSpan = yield* storage.getSpan(traceId, spanId);
 		const operationFacets = yield* storage.facets({
 			fromNs: 999n,
 			toNs: 2_000n,
@@ -143,12 +144,78 @@ const logCorrelation = Effect.scoped(
 			logIdCount: result.logIds.length,
 			searchMatchCount: logs.items.length,
 			body: log.body.type === "string" ? log.body.value : undefined,
-			spanLogCount: trace.spans[0]?.logCount,
-			traceLogCount: trace.logs.length,
+			spanLogCount: correlatedSpan.logCount,
+			traceLogCount: traceLogs.items.length,
 			operationFacets: operationFacets.items,
 			severityFacets: severityFacets.items,
 			attributeKeyFacets: attributeKeyFacets.items,
 			attributeValueFacets: attributeValueFacets.items,
+		};
+	}),
+);
+
+const nonFiniteValues = Effect.scoped(
+	Effect.gen(function* () {
+		const storage = yield* openTelemetryStorage({ databasePath: isolatedDatabase() });
+		const values = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+		yield* storage.write({
+			signal: "traces",
+			spans: [
+				makeSpan({
+					attributes: Object.fromEntries(
+						values.map((value, index) => [`value.${index}`, { type: "double" as const, value }]),
+					),
+				}),
+			],
+		});
+		const written = yield* storage.write({
+			signal: "logs",
+			logs: values.map((value, index) =>
+				makeLog({
+					traceId: undefined,
+					spanId: undefined,
+					timestampNs: 2_000n + BigInt(index),
+					observedTimeNs: 2_000n + BigInt(index),
+					body: { type: "double", value },
+				}),
+			),
+		});
+		const trace = yield* storage.getTrace(traceId);
+		const logs = yield* Effect.all(written.logIds.map((id) => storage.getLog(id)));
+		const render = (value: number | undefined) =>
+			value === undefined ? "missing" : Number.isNaN(value) ? "NaN" : String(value);
+		return {
+			spanValues: values.map((_, index) => {
+				const attribute = trace.spans[0]?.attributes[`value.${index}`];
+				return render(attribute?.type === "double" ? attribute.value : undefined);
+			}),
+			logValues: logs.map((log) => render(log.body.type === "double" ? log.body.value : undefined)),
+		};
+	}),
+);
+
+const boundedTraceDetail = Effect.scoped(
+	Effect.gen(function* () {
+		const storage = yield* openTelemetryStorage({
+			databasePath: isolatedDatabase(),
+			maxTraceDetailSpans: 2,
+		});
+		yield* storage.write({
+			signal: "traces",
+			spans: [
+				makeSpan({ spanId: id16(1), parentSpanId: undefined, startTimeNs: 1_000n }),
+				makeSpan({ spanId: id16(2), parentSpanId: id16(1), startTimeNs: 1_001n }),
+				makeSpan({ spanId: id16(3), parentSpanId: id16(2), startTimeNs: 1_002n }),
+			],
+		});
+		const trace = yield* storage.getTrace(traceId);
+		const directSpan = yield* storage.getSpan(traceId, id16(3));
+		return {
+			spanCount: trace.spanCount,
+			returnedSpanCount: trace.spans.length,
+			spansTruncated: trace.spansTruncated,
+			directSpanId: directSpan.spanId,
+			directSpanDepth: directSpan.depth,
 		};
 	}),
 );
@@ -629,37 +696,84 @@ const failureCode = Effect.gen(function* () {
 	return { code: opened._tag === "Failure" ? opened.failure.code : "unexpected_success" };
 });
 
+const maintenanceReset = Effect.scoped(
+	Effect.gen(function* () {
+		const databasePath = isolatedDatabase();
+		const storage = yield* openTelemetryStorage({ databasePath });
+		for (let batch = 0; batch < 5; batch += 1) {
+			yield* storage.write({
+				signal: "logs",
+				logs: Array.from({ length: 100 }, (_, index) =>
+					makeLog({
+						timestampNs: BigInt(10_000 + batch * 100 + index),
+						body: { type: "string", value: `${batch}:${index}:${"x".repeat(4_096)}` },
+					}),
+				),
+			});
+		}
+		yield* storage.checkpoint;
+		const before = yield* storage.information;
+		yield* storage.reset;
+		const after = yield* storage.information;
+		const logs = yield* storage.searchLogs({
+			fromNs: 0n,
+			toNs: 100_000n,
+			services: [],
+			attributes: [],
+			sort: "newest",
+			limit: 100,
+		});
+		const stats = yield* storage.ingestionStats;
+		return {
+			beforeStorageSizeBytes: before.storageSizeBytes.toString(),
+			afterStorageSizeBytes: after.storageSizeBytes.toString(),
+			beforeLiveDataSizeBytes: before.databaseSizeBytes.toString(),
+			afterLiveDataSizeBytes: after.databaseSizeBytes.toString(),
+			afterLogCount: logs.items.length,
+			acceptedLogRecords: stats.acceptedLogRecords.toString(),
+			databaseMode: (statSync(databasePath).mode & 0o777).toString(8),
+			directoryMode: (statSync(dirname(databasePath)).mode & 0o777).toString(8),
+		};
+	}),
+);
+
 const scenario = process.argv[2];
 const result =
 	scenario === "span-upsert"
 		? await Effect.runPromise(spanUpsert)
 		: scenario === "log-correlation"
 			? await Effect.runPromise(logCorrelation)
-			: scenario === "retention-cleanup"
-				? await Effect.runPromise(retentionCleanup)
-				: scenario === "size-retention-ordering"
-					? await Effect.runPromise(sizeRetentionOrdering)
-					: scenario === "timestamp-fallback"
-						? await Effect.runPromise(timestampFallback)
-						: scenario === "retention-failure"
-							? await Effect.runPromise(retentionFailure)
-							: scenario === "retention-progress"
-								? await Effect.runPromise(retentionProgress)
-								: scenario === "cyclic-trace-structure"
-									? await Effect.runPromise(cyclicTraceStructure)
-									: scenario === "pagination-contracts"
-										? await Effect.runPromise(paginationContracts)
-										: scenario === "ingestion-observability"
-											? await Effect.runPromise(ingestionObservability)
-											: scenario === "bounded-projection-policy"
-												? await Effect.runPromise(boundedProjectionPolicy)
-												: scenario === "failure-code"
-													? await Effect.runPromise(failureCode)
-													: (() => {
-															throw new Error(
-																`Unknown storage test scenario: ${scenario}`,
-															);
-														})();
+			: scenario === "non-finite-values"
+				? await Effect.runPromise(nonFiniteValues)
+				: scenario === "bounded-trace-detail"
+					? await Effect.runPromise(boundedTraceDetail)
+					: scenario === "maintenance-reset"
+						? await Effect.runPromise(maintenanceReset)
+						: scenario === "retention-cleanup"
+							? await Effect.runPromise(retentionCleanup)
+							: scenario === "size-retention-ordering"
+								? await Effect.runPromise(sizeRetentionOrdering)
+								: scenario === "timestamp-fallback"
+									? await Effect.runPromise(timestampFallback)
+									: scenario === "retention-failure"
+										? await Effect.runPromise(retentionFailure)
+										: scenario === "retention-progress"
+											? await Effect.runPromise(retentionProgress)
+											: scenario === "cyclic-trace-structure"
+												? await Effect.runPromise(cyclicTraceStructure)
+												: scenario === "pagination-contracts"
+													? await Effect.runPromise(paginationContracts)
+													: scenario === "ingestion-observability"
+														? await Effect.runPromise(ingestionObservability)
+														: scenario === "bounded-projection-policy"
+															? await Effect.runPromise(boundedProjectionPolicy)
+															: scenario === "failure-code"
+																? await Effect.runPromise(failureCode)
+																: (() => {
+																		throw new Error(
+																			`Unknown storage test scenario: ${scenario}`,
+																		);
+																	})();
 console.log(`BELFRY_TEST_RESULT=${JSON.stringify(result)}`);
 
 function isolatedDatabase() {

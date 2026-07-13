@@ -64,7 +64,11 @@ export type StorageInformation = {
 	readonly writerRole: "read-write";
 	readonly readerRole: "read-only";
 	readonly schemaVersion: number;
+	/** Live SQLite pages, excluding freelist pages. This is the retention size budget. */
 	readonly databaseSizeBytes: bigint;
+	/** Apparent bytes across the database, WAL, and shared-memory files. */
+	readonly storageSizeBytes: bigint;
+	readonly walSizeBytes: bigint;
 };
 
 export type RetentionOptions = {
