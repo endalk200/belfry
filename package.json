@@ -24,7 +24,7 @@
 		"version-packages": "changeset version && bun run sync-cli-version"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.2",
+		"@biomejs/biome": "2.5.3",
 		"@changesets/cli": "^2.31.0",
 		"@opentelemetry/api": "^1.9.1",
 		"@opentelemetry/api-logs": "^0.220.0",
@@ -35,8 +35,8 @@
 		"@opentelemetry/sdk-trace-base": "^2.9.0",
 		"@playwright/test": "^1.59.1",
 		"@types/bun": "^1.3.14",
-		"turbo": "^2.10.4",
-		"typescript": "6.0.3"
+		"turbo": "^2.10.5",
+		"typescript": "7.0.2"
 	},
 	"engines": {
 		"bun": ">=1.3.0"

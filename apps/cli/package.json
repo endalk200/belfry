@@ -55,10 +55,10 @@
 		"@belfry/storage": "workspace:*",
 		"@belfry/typescript-config": "workspace:*",
 		"@belfry/web": "workspace:*",
-		"@effect/opentelemetry": "4.0.0-beta.97",
-		"@effect/platform-bun": "4.0.0-beta.97",
-		"@effect/sql-sqlite-bun": "4.0.0-beta.97",
-		"@effect/vitest": "4.0.0-beta.97",
+		"@effect/opentelemetry": "4.0.0-beta.98",
+		"@effect/platform-bun": "4.0.0-beta.98",
+		"@effect/sql-sqlite-bun": "4.0.0-beta.98",
+		"@effect/vitest": "4.0.0-beta.98",
 		"@opentelemetry/api": "^1.9.1",
 		"@opentelemetry/api-logs": "^0.220.0",
 		"@opentelemetry/exporter-logs-otlp-http": "^0.220.0",
@@ -70,8 +70,8 @@
 		"@opentelemetry/semantic-conventions": "^1.42.0",
 		"@types/bun": "^1.3.14",
 		"@types/node": "^26.1.0",
-		"effect": "4.0.0-beta.97",
-		"typescript": "6.0.3",
+		"effect": "4.0.0-beta.98",
+		"typescript": "7.0.2",
 		"vitest": "^4.1.10"
 	}
 }
