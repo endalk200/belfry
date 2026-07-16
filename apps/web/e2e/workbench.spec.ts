@@ -1,4 +1,3 @@
-import { formatTimestamp } from "@belfry/workspace";
 import { workspaceScenario } from "@belfry/workspace/test-support";
 import { expect, type Page, type Route, test } from "@playwright/test";
 
@@ -51,7 +50,7 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 	const traceHeading = page.locator(".detail-heading");
 	await expect(traceHeading.getByText("shop/checkout · test", { exact: true })).toBeVisible();
 	await expect(traceHeading.getByText("Complete", { exact: true })).toBeVisible();
-	await expect(traceHeading.getByText(formatTimestamp(workspaceScenario.startNs), { exact: true })).toBeVisible();
+	await expect(traceHeading.getByText("2026-06-14T06:53:20.000000001Z", { exact: true })).toBeVisible();
 	await expect(page.getByRole("heading", { name: "Span waterfall" })).toBeVisible();
 	await expect(page.getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/openapi.json");
 	await page.getByRole("slider", { name: "Scale" }).fill("2");
