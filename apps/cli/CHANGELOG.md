@@ -1,5 +1,11 @@
 # @belfry/cli
 
+## 0.1.2
+
+### Patch Changes
+
+- 0a9a269: Simplify trace and log detail headings by consolidating trace context and removing redundant section labels.
+
 ## 0.1.1
 
 ### Patch Changes
