@@ -1,3 +1,4 @@
+import { formatTimestamp } from "@belfry/workspace";
 import { workspaceScenario } from "@belfry/workspace/test-support";
 import { expect, type Page, type Route, test } from "@playwright/test";
 
@@ -47,6 +48,10 @@ test("filters, searches, correlates, restores URLs, and exposes complete detail"
 
 	await page.locator(".table-row").filter({ hasText: "GET /checkout" }).click();
 	await expect(page).toHaveURL(new RegExp(`/traces/${traceId}`, "u"));
+	const traceHeading = page.locator(".detail-heading");
+	await expect(traceHeading.getByText("shop/checkout · test", { exact: true })).toBeVisible();
+	await expect(traceHeading.getByText("Complete", { exact: true })).toBeVisible();
+	await expect(traceHeading.getByText(formatTimestamp(workspaceScenario.startNs), { exact: true })).toBeVisible();
 	await expect(page.getByRole("heading", { name: "Span waterfall" })).toBeVisible();
 	await expect(page.getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/openapi.json");
 	await page.getByRole("slider", { name: "Scale" }).fill("2");

@@ -47,8 +47,14 @@ export function TraceDetailView({
 		<article className="trace-detail" aria-labelledby="trace-title">
 			<div className="detail-heading">
 				<div className="detail-heading-main">
-					<p className="eyebrow">TRACE</p>
 					<h1 id="trace-title">{trace.rootOperation || "Unnamed operation"}</h1>
+					<div className="trace-heading-context">
+						{trace.services.length > 0 ? (
+							<span>{trace.services.map(formatService).join(" → ")}</span>
+						) : null}
+						<span>{trace.active ? "Running" : "Complete"}</span>
+						<time dateTime={formatTimestamp(trace.startTimeNs)}>{formatTimestamp(trace.startTimeNs)}</time>
+					</div>
 					<button
 						type="button"
 						className="copy-id"
@@ -69,22 +75,19 @@ export function TraceDetailView({
 				<SummaryMetric label="Errors" value={String(trace.errorCount)} alert={trace.errorCount > 0} />
 				<SummaryMetric label="Services" value={String(trace.services.length)} />
 			</div>
-			<div className="trace-context">
-				<span>{formatTimestamp(trace.startTimeNs)}</span>
-				<span>{trace.active ? "Running trace" : "Complete trace"}</span>
-				<span>{trace.services.map(formatService).join(" → ")}</span>
-				{trace.warnings.map((warning) => (
-					<span className="warning" key={warning}>
-						Warning: {warning}
-					</span>
-				))}
-				{trace.spansTruncated ? (
-					<span className="warning">
-						Showing the first {trace.spans.length} of {trace.spanCount} spans. Narrow the trace at the
-						source for a complete waterfall.
-					</span>
-				) : null}
-			</div>
+			{trace.warnings.length > 0 || trace.spansTruncated ? (
+				<div className="trace-warnings">
+					{trace.warnings.map((warning) => (
+						<span key={warning}>Warning: {warning}</span>
+					))}
+					{trace.spansTruncated ? (
+						<span>
+							Showing the first {trace.spans.length} of {trace.spanCount} spans. Narrow the trace at the
+							source for a complete waterfall.
+						</span>
+					) : null}
+				</div>
+			) : null}
 
 			<Waterfall trace={trace} workspace={workspace} onAction={onAction} />
 
@@ -118,10 +121,7 @@ export function TraceDetailView({
 
 			<section className="trace-log-strip" aria-labelledby="trace-logs-title">
 				<div className="section-heading">
-					<div>
-						<p className="eyebrow">CORRELATION</p>
-						<h2 id="trace-logs-title">Trace logs</h2>
-					</div>
+					<h2 id="trace-logs-title">Trace logs</h2>
 					<span>{logs.length} records</span>
 				</div>
 				{logs.length === 0 ? (
@@ -162,10 +162,7 @@ function Waterfall({
 	return (
 		<section className="waterfall-section" aria-labelledby="waterfall-title">
 			<div className="section-heading">
-				<div>
-					<p className="eyebrow">TIMELINE</p>
-					<h2 id="waterfall-title">Span waterfall</h2>
-				</div>
+				<h2 id="waterfall-title">Span waterfall</h2>
 				<label className="zoom-control">
 					Scale{" "}
 					<input
@@ -493,12 +490,9 @@ export function LogDetailView({
 	return (
 		<article className="bottom-detail log-detail" id="log-detail" aria-labelledby="log-detail-title">
 			<div className="section-heading">
-				<div>
-					<p className="eyebrow">SELECTED LOG</p>
-					<h2 id="log-detail-title">
-						{formatSeverity(log.severityNumber, log.severityText)} · {log.bodyPreview || "Empty log body"}
-					</h2>
-				</div>
+				<h2 id="log-detail-title">
+					{formatSeverity(log.severityNumber, log.severityText)} · {log.bodyPreview || "Empty log body"}
+				</h2>
 				<div className="heading-actions">
 					<button
 						type="button"
