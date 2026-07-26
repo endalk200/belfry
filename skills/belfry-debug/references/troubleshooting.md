@@ -95,9 +95,10 @@ hex; span IDs are canonical lowercase 16-character hex.
 
 ## 5. Trace/log correlation
 
-Exact correlation requires the log's OTLP record to carry `traceId` and
-`spanId`. Emit the log while the intended span context is active, and propagate
-context across asynchronous and cross-Service boundaries.
+Exact trace correlation requires a canonical `traceId`. A canonical `spanId`
+is optional; when present, it narrows the correlation to a specific span. Emit
+the log while the intended span context is active, and propagate context across
+asynchronous and cross-Service boundaries.
 
 Belfry also recognizes canonical IDs in log attributes named `traceId` or
 `trace_id`, and `spanId` or `span_id`, for SDK bridges that encode Effect span
