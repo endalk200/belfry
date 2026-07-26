@@ -48,6 +48,13 @@ The browser Workspace provides:
 - URL-addressable Workspace state, bounded pagination, and live refresh;
 - ingestion health, diagnostics, a typed Query API, and `/openapi.json`.
 
+## Use Belfry with coding agents
+
+The repository-owned [Belfry skill](skills/belfry-debug/SKILL.md) teaches coding
+agents how to start or discover the Daemon, configure OTLP trace and log export,
+verify ingestion, search bounded telemetry, follow trace/span/log correlations,
+and report evidence separately from hypotheses.
+
 ## Operate the local Daemon
 
 ```sh
