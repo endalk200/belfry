@@ -40,5 +40,6 @@ _Avoid_: UI API, agent API, raw SQL API
 
 **Debugging Skill**:
 Repository-owned instructions under `skills/` that teach coding agents to
-discover Belfry and debug software using evidence from the Query API.
+set up Belfry, export and verify local telemetry, and debug software using
+correlated evidence from the Query API.
 _Avoid_: MCP server, AI telemetry integration
