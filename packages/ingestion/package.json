@@ -28,11 +28,11 @@
 		"@belfry/otlp-proto": "workspace:*",
 		"@belfry/storage": "workspace:*",
 		"@belfry/telemetry": "workspace:*",
-		"effect": "4.0.0-beta.100"
+		"effect": "4.0.0-beta.102"
 	},
 	"devDependencies": {
 		"@belfry/typescript-config": "workspace:*",
-		"@effect/vitest": "4.0.0-beta.100",
+		"@effect/vitest": "4.0.0-beta.102",
 		"@types/bun": "^1.3.14",
 		"typescript": "7.0.2",
 		"vitest": "^4.1.10"
