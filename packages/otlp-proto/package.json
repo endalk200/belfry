@@ -17,11 +17,11 @@
 		"lint:fix": "biome check --fix package.json tsconfig.json README.md"
 	},
 	"dependencies": {
-		"protobufjs": "^8.7.1"
+		"protobufjs": "^8.7.2"
 	},
 	"devDependencies": {
 		"@belfry/typescript-config": "workspace:*",
-		"protobufjs-cli": "^2.6.1",
+		"protobufjs-cli": "^2.6.2",
 		"typescript": "7.0.2"
 	}
 }
